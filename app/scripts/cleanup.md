@@ -7,7 +7,7 @@
 这个文件会被映射到：
 
 ```text
-/scripts/cleanup/
+/scripts/cleanup.html
 ```
 
 ## 适合放什么
@@ -17,3 +17,17 @@
 - 使用示例
 - 常见问题
 
+## 示例代码
+
+```python
+from pathlib import Path
+
+
+def main() -> None:
+    root = Path(__file__).resolve().parent
+    print(f"working in {root}")
+
+
+if __name__ == "__main__":
+    main()
+```
