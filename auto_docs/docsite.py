@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -114,14 +113,37 @@ def stage_docs() -> list[tuple[Path, str]]:
     return markdown_routes
 
 
+def _patch_mkdocs_shadcn_windows_paths() -> None:
+    from urllib.parse import urljoin
+
+    from shadcn.plugins.mixins.markdown import MarkdownMixin
+
+    def on_page_context(self, context, page, config, nav):
+        src_path = page.file.src_path.replace("\\", "/")
+        self.raw_markdown[page.file.abs_src_path] = str(Path(config.site_dir) / Path(src_path))
+        context.update(
+            {
+                "raw_markdown_url": urljoin(
+                    config.site_url or "/",
+                    src_path,
+                )
+            }
+        )
+        return super(MarkdownMixin, self).on_page_context(context, page, config, nav)
+
+    MarkdownMixin.on_page_context = on_page_context
+
+
 def build_site() -> list[tuple[Path, str]]:
+    from mkdocs.commands.build import build
+    from mkdocs.config import load_config
+
     routes = stage_docs()
     SITE_DIR.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [sys.executable, "-m", "mkdocs", "build", "--clean", "--config-file", str(MKDOCS_CONFIG)],
-        cwd=ROOT_DIR,
-        check=True,
-    )
+    _patch_mkdocs_shadcn_windows_paths()
+    config = load_config(config_file_path=str(MKDOCS_CONFIG))
+    config.plugins.on_startup(command="build", dirty=False)
+    build(config, dirty=False)
     return routes
 
 

@@ -1,6 +1,6 @@
 # Python 脚本文档系统
 
-这套方案基于 `MkDocs + Material for MkDocs`，外层再包一层很薄的 Python 构建脚本，满足下面几个要求：
+这套方案基于 `MkDocs + mkdocs-shadcn`，外层再包一层很薄的 Python 构建脚本，满足下面几个要求：
 
 - 所有 Python 脚本都放在 `app/`
 - 递归扫描 `app/**/*.md`
@@ -18,6 +18,7 @@
 - `README.md` 会自动映射为同目录的 `index.md`
 - 如果同目录同时存在 `index.md` 和 `README.md`，优先使用 `index.md`
 - 最终路由更接近目录语义，而不是出现 `/readme/`
+- 针对 `mkdocs-shadcn` 在 Windows 下的路径警告做了运行时修补
 
 ## 目录约定
 

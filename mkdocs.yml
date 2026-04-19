@@ -5,15 +5,13 @@ site_dir: dist/html
 use_directory_urls: true
 
 theme:
-  name: material
-  language: zh
-  features:
-    - navigation.sections
-    - navigation.expand
-    - navigation.top
-    - content.code.copy
-    - search.highlight
-    - search.suggest
+  name: shadcn
+  show_title: true
+  topbar_sections: true
+  show_datetime: false
+  pygments_style:
+    light: shadcn-light
+    dark: github-dark
 
 plugins:
   - search
@@ -41,4 +39,3 @@ validation:
     absolute_links: relative_to_docs
     anchors: warn
     unrecognized_links: warn
-
