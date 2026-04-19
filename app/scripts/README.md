@@ -7,6 +7,7 @@
 ```text
 app/
   scripts/
+    README.md
     cleanup.py
     cleanup.md
     report/
@@ -16,6 +17,7 @@ app/
 
 ## 路由示例
 
-- `app/scripts/index.md` -> `/scripts/`
+- `app/scripts/README.md` -> `/scripts/`
+- `app/scripts/cleanup.md` -> `/scripts/cleanup/`
 - `app/scripts/report/README.md` -> `/scripts/report/`
 

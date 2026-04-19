@@ -6,12 +6,13 @@
 
 - Python 脚本放在 `app/`
 - 说明文档和脚本放在一起维护
-- `index.md` 作为目录首页
-- `README.md` 也会在构建时自动转成目录首页
+- `README.md` 作为目录首页
+- 其他任意 Markdown 都作为普通内容页
 
 ## 下一步
 
 1. 在 `app/` 下按业务拆目录
-2. 每个目录补一个 `index.md` 或 `README.md`
-3. 执行 `uv run build-docs`
+2. 每个目录补一个 `README.md`
+3. 功能说明用单独的 `*.md`
+4. 执行 `uv run build-docs`
 

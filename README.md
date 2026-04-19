@@ -15,9 +15,10 @@
 
 - `app/` 里可以同时放 `.py` 和 `.md`
 - 扫描时只提取文档相关文件
-- `README.md` 会自动映射为同目录的 `index.md`
-- 如果同目录同时存在 `index.md` 和 `README.md`，优先使用 `index.md`
-- 最终路由更接近目录语义，而不是出现 `/readme/`
+- 只有 `README.md` 会作为目录首页
+- 其他非 `README.md` 的 Markdown 都会作为普通内容页
+- 普通内容页路由按“目录 + 文件名”生成
+- 如果两个文件会生成同一路由，构建时直接报错
 - 针对 `mkdocs-shadcn` 在 Windows 下的路径警告做了运行时修补
 
 ## 目录约定
@@ -26,18 +27,20 @@
 auto_docs/
   docsite.py
 app/
-  index.md
+  README.md
   scripts/
     cleanup.py
-    index.md
+    README.md
+    cleanup.md
     report/
       README.md
 ```
 
 示例路由：
 
-- `app/index.md` -> `/`
-- `app/scripts/index.md` -> `/scripts/`
+- `app/README.md` -> `/`
+- `app/scripts/README.md` -> `/scripts/`
+- `app/scripts/cleanup.md` -> `/scripts/cleanup/`
 - `app/scripts/report/README.md` -> `/scripts/report/`
 
 ## 使用方式
@@ -62,4 +65,10 @@ dist/html
 
 ### 2. 是否能扫描所有 Markdown
 
-能。当前脚本会递归扫描 `app/` 下所有 `.md`，并保留目录层级来生成页面路径。
+能。当前脚本会递归扫描 `app/` 下所有 `.md`，并按下面的规则生成页面路径：
+
+- `README.md` -> 当前目录首页
+- 其他 `*.md` -> 当前目录下的独立页面
+- 例如 `app/tools/README.md` -> `/tools/`
+- 例如 `app/tools/install.md` -> `/tools/install/`
+- 例如 `app/index.md` -> `/index/`

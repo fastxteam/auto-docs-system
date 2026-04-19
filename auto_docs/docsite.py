@@ -51,6 +51,8 @@ def _target_relative_path(source_path: Path) -> Path:
     relative_path = source_path.relative_to(APP_DIR)
     if relative_path.name.lower() == "readme.md":
         return relative_path.with_name("index.md")
+    if relative_path.name.lower() == "index.md":
+        return relative_path.with_suffix("") / "index.md"
     return relative_path
 
 
@@ -61,27 +63,38 @@ def _route_from_target(target_relative: Path) -> str:
     return f"/{target_relative.with_suffix('').as_posix()}/"
 
 
-def _resolve_target_collision(existing_source: Path, source_path: Path, target_relative: Path) -> Path:
-    existing_name = existing_source.name.lower()
-    current_name = source_path.name.lower()
-    if {existing_name, current_name} == {"index.md", "readme.md"}:
-        return source_path if current_name == "index.md" else existing_source
+def _raise_target_collision(existing_source: Path, source_path: Path, target_relative: Path) -> None:
     raise SystemExit(
-        "Route collision detected between "
+        "Target path collision detected between "
         f"{existing_source.relative_to(ROOT_DIR)} and {source_path.relative_to(ROOT_DIR)} "
         f"-> {target_relative.as_posix()}"
     )
 
 
+def _raise_route_collision(existing_source: Path, source_path: Path, route: str) -> None:
+    raise SystemExit(
+        "Route collision detected between "
+        f"{existing_source.relative_to(ROOT_DIR)} and {source_path.relative_to(ROOT_DIR)} "
+        f"-> {route}"
+    )
+
+
 def _prepare_source_manifest() -> tuple[list[Path], list[tuple[Path, str]]]:
     occupied_targets: dict[Path, Path] = {}
+    occupied_routes: dict[str, Path] = {}
     for source_path in _iter_source_files():
         target_relative = _target_relative_path(source_path)
         existing_source = occupied_targets.get(target_relative)
         if existing_source is not None:
-            occupied_targets[target_relative] = _resolve_target_collision(existing_source, source_path, target_relative)
-            continue
+            _raise_target_collision(existing_source, source_path, target_relative)
         occupied_targets[target_relative] = source_path
+
+        if source_path.suffix.lower() == ".md":
+            route = _route_from_target(target_relative)
+            existing_route = occupied_routes.get(route)
+            if existing_route is not None:
+                _raise_route_collision(existing_route, source_path, route)
+            occupied_routes[route] = source_path
 
     source_files = sorted(occupied_targets.values())
     markdown_routes: list[tuple[Path, str]] = []
