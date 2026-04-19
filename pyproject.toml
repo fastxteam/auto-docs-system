@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "python-script-docs"
+version = "0.1.0"
+description = "Static documentation system for Python scripts stored under app/."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "mkdocs>=1.6.1,<2.0",
+  "mkdocs-material>=9.6.18,<10.0",
+]
+
+[project.scripts]
+build-docs = "auto_docs.docsite:build_cli"
+scan-docs = "auto_docs.docsite:scan_cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["auto_docs"]
