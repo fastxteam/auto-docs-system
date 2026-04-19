@@ -11,6 +11,8 @@ BUILD_ROOT = ROOT_DIR / ".doc_build"
 DOCS_DIR = BUILD_ROOT / "docs"
 SITE_DIR = ROOT_DIR / "dist" / "html"
 MKDOCS_CONFIG = ROOT_DIR / "mkdocs.yml"
+THEME_OVERRIDES_DIR = ROOT_DIR / "auto_docs" / "theme_overrides"
+USE_DIRECTORY_URLS = False
 
 IGNORED_PARTS = {
     ".doc_build",
@@ -57,10 +59,14 @@ def _target_relative_path(source_path: Path) -> Path:
 
 
 def _route_from_target(target_relative: Path) -> str:
-    if target_relative.name.lower() == "index.md":
-        parent = target_relative.parent.as_posix()
-        return "/" if parent == "." else f"/{parent}/"
-    return f"/{target_relative.with_suffix('').as_posix()}/"
+    if USE_DIRECTORY_URLS:
+        if target_relative.name.lower() == "index.md":
+            parent = target_relative.parent.as_posix()
+            return "/" if parent == "." else f"/{parent}/"
+        return f"/{target_relative.with_suffix('').as_posix()}/"
+
+    html_target = target_relative.with_suffix(".html").as_posix()
+    return f"/{html_target}"
 
 
 def _raise_target_collision(existing_source: Path, source_path: Path, target_relative: Path) -> None:
@@ -127,8 +133,6 @@ def stage_docs() -> list[tuple[Path, str]]:
 
 
 def _patch_mkdocs_shadcn_windows_paths() -> None:
-    from urllib.parse import urljoin
-
     from shadcn.plugins.mixins.markdown import MarkdownMixin
 
     def on_page_context(self, context, page, config, nav):
@@ -136,10 +140,7 @@ def _patch_mkdocs_shadcn_windows_paths() -> None:
         self.raw_markdown[page.file.abs_src_path] = str(Path(config.site_dir) / Path(src_path))
         context.update(
             {
-                "raw_markdown_url": urljoin(
-                    config.site_url or "/",
-                    src_path,
-                )
+                "raw_markdown_url": src_path
             }
         )
         return super(MarkdownMixin, self).on_page_context(context, page, config, nav)
@@ -155,6 +156,9 @@ def build_site() -> list[tuple[Path, str]]:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
     _patch_mkdocs_shadcn_windows_paths()
     config = load_config(config_file_path=str(MKDOCS_CONFIG))
+    overrides_dir = str(THEME_OVERRIDES_DIR.resolve())
+    config.theme.dirs[:] = [overrides_dir, *[d for d in config.theme.dirs if Path(d).resolve() != Path(overrides_dir)]]
+    config.use_directory_urls = USE_DIRECTORY_URLS
     config.plugins.on_startup(command="build", dirty=False)
     build(config, dirty=False)
     return routes

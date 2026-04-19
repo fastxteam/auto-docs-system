@@ -20,6 +20,7 @@
 - 普通内容页路由按“目录 + 文件名”生成
 - 如果两个文件会生成同一路由，构建时直接报错
 - 针对 `mkdocs-shadcn` 在 Windows 下的路径警告做了运行时修补
+- 构建结果使用文件式链接，便于拷到其他电脑直接打开
 
 ## 目录约定
 
@@ -38,10 +39,10 @@ app/
 
 示例路由：
 
-- `app/README.md` -> `/`
-- `app/scripts/README.md` -> `/scripts/`
-- `app/scripts/cleanup.md` -> `/scripts/cleanup/`
-- `app/scripts/report/README.md` -> `/scripts/report/`
+- `app/README.md` -> `/index.html`
+- `app/scripts/README.md` -> `/scripts/index.html`
+- `app/scripts/cleanup.md` -> `/scripts/cleanup.html`
+- `app/scripts/report/README.md` -> `/scripts/report/index.html`
 
 ## 使用方式
 
@@ -67,8 +68,8 @@ dist/html
 
 能。当前脚本会递归扫描 `app/` 下所有 `.md`，并按下面的规则生成页面路径：
 
-- `README.md` -> 当前目录首页
+- `README.md` -> 当前目录首页页面
 - 其他 `*.md` -> 当前目录下的独立页面
-- 例如 `app/tools/README.md` -> `/tools/`
-- 例如 `app/tools/install.md` -> `/tools/install/`
-- 例如 `app/index.md` -> `/index/`
+- 例如 `app/tools/README.md` -> `/tools/index.html`
+- 例如 `app/tools/install.md` -> `/tools/install.html`
+- 例如 `app/index.md` -> `/index/index.html`
