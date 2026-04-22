@@ -17,7 +17,6 @@ app/
 
 ## 路由示例
 
-- `app/scripts/README.md` -> `/scripts/`
-- `app/scripts/cleanup.md` -> `/scripts/cleanup/`
-- `app/scripts/report/README.md` -> `/scripts/report/`
-
+- `app/scripts/README.md` -> `/scripts/index.html`
+- `app/scripts/cleanup.md` -> `/scripts/cleanup.html`
+- `app/scripts/report/README.md` -> `/scripts/report/index.html`

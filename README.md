@@ -76,7 +76,7 @@ dist/html
 uv run scan-releases
 ```
 
-示例：
+示例 1，单架构工具（兼容旧格式）：
 
 ```toml
 [module]
@@ -118,8 +118,86 @@ architecture_notes = "版本信息改为从 release.toml 渲染。"
 说明：
 
 - `[version]` 表示当前版本快照
+- `[architecture]` 表示当前唯一架构线
 - `[[history]]` 表示历史发布记录，按版本维度输出日志
 - 即使不写 `[[history]]`，系统也会用 `[version]` 自动兜底生成一条当前版本记录
+
+示例 2，同一个工具下按架构线拆分，例如 `ARC_V1` / `ARC_V2`：
+
+```toml
+[module]
+name = "scripts"
+summary = "脚本主模块"
+owner = "Platform Team"
+home = "README.md"
+
+[[architectures]]
+name = "ARC_V1"
+summary = "旧架构线，继续维护稳定任务。"
+home = "README.md"
+style = "CLI + Batch"
+runtime = "Python 3.13"
+entrypoints = ["cleanup.py"]
+interfaces = ["CLI", "Markdown Docs"]
+platforms = ["Windows"]
+dependencies = []
+current = "1.3.0"
+channel = "stable"
+released_at = "2026-04-23"
+notes = "ARC_V1 进入维护期，保持现有批处理能力。"
+architecture_notes = "面向现网任务，优先保证兼容性。"
+
+[[architectures.history]]
+version = "1.3.0"
+channel = "stable"
+released_at = "2026-04-23"
+title = "ARC_V1 维护版本"
+summary = "补充版本中心和历史日志。"
+changes = [
+  "接入 release-center",
+  "补齐 ARC_V1 当前版本说明",
+]
+breaking_changes = []
+
+[[architectures]]
+name = "ARC_V2"
+summary = "新架构线，用于承接后续模块化改造。"
+home = "README.md"
+style = "CLI + Modular Pipeline"
+runtime = "Python 3.13"
+entrypoints = ["cleanup.py"]
+interfaces = ["CLI", "Markdown Docs"]
+platforms = ["Windows"]
+dependencies = ["report"]
+current = "2.0.0-beta.1"
+channel = "beta"
+released_at = "2026-04-23"
+notes = "ARC_V2 开始分层治理任务入口和统计输出。"
+architecture_notes = "逐步替换旧批处理拼装方式。"
+
+[[architectures.history]]
+version = "2.0.0-beta.1"
+channel = "beta"
+released_at = "2026-04-23"
+title = "ARC_V2 首个测试版本"
+summary = "为后续模块化拆分建立新架构线。"
+changes = [
+  "建立 ARC_V2 架构线",
+  "开始独立记录 ARC_V2 发布日志",
+]
+breaking_changes = [
+  "新旧架构线发布节奏独立维护",
+]
+```
+
+多架构模式说明：
+
+- `[[architectures]]` 表示同一个工具下的一条架构线
+- `[[architectures.history]]` 表示该架构线自己的版本历史
+- 生成结果仍然是“一个工具一个发布日志页”，但页内会按 `ARC_V1`、`ARC_V2` 分节展示
+- `release-center/index.md` 会汇总所有工具和架构线
+- `release-center/history/index.md` 会把所有架构线的历史记录合并成全局时间线
+- 同一个 `release.toml` 内，不要混用旧格式 `[version]/[architecture]/[[history]]` 和新格式 `[[architectures]]`
 
 ## 你最关心的两个问题
 

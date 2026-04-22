@@ -7,6 +7,7 @@ import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
+from markdown.extensions.toc import slugify_unicode
 from pathlib import Path
 import re
 
@@ -43,6 +44,8 @@ class ReleaseEntry:
     module_name: str
     module_summary: str
     owner: str
+    architecture_name: str
+    architecture_summary: str
     version: str
     channel: str
     released_at: str
@@ -209,6 +212,11 @@ def _slugify(text: str) -> str:
     return slug or "release"
 
 
+def _heading_anchor(text: str) -> str:
+    anchor = slugify_unicode(text.strip(), "-")
+    return anchor or "release"
+
+
 def _parse_release_datetime(value: str) -> datetime | None:
     text = value.strip()
     if not text:
@@ -297,6 +305,7 @@ def _latest_history_date(entries: list[ReleaseEntry]) -> str:
 
 def _build_history_items(
     module_name: str,
+    architecture_name: str,
     version_data: dict[str, object],
     architecture_data: dict[str, object],
     raw_history: list[dict[str, object]],
@@ -334,7 +343,10 @@ def _build_history_items(
                     raw_item.get("released_at"),
                     current_released_at if is_current else "",
                 ),
-                title=_as_string(raw_item.get("title"), f"{module_name} {version}"),
+                title=_as_string(
+                    raw_item.get("title"),
+                    f"{module_name} / {_display_architecture_name(architecture_name)} {version}",
+                ),
                 summary=_as_string(
                     raw_item.get("summary"),
                     _as_string(raw_item.get("notes"), current_notes if is_current else ""),
@@ -355,7 +367,7 @@ def _build_history_items(
                 version=current_version,
                 channel=current_channel,
                 released_at=current_released_at,
-                title=f"{module_name} {current_version}",
+                title=f"{module_name} / {_display_architecture_name(architecture_name)} {current_version}",
                 summary=current_notes,
                 changes=[],
                 breaking_changes=[],
@@ -378,6 +390,96 @@ def _history_count(entries: list[ReleaseEntry]) -> int:
     return sum(len(entry.history) for entry in entries)
 
 
+def _tool_count(entries: list[ReleaseEntry]) -> int:
+    return len({entry.slug for entry in entries})
+
+
+def _group_release_entries(entries: list[ReleaseEntry]) -> list[list[ReleaseEntry]]:
+    grouped: dict[str, list[ReleaseEntry]] = {}
+    for entry in sorted(entries, key=lambda item: (item.module_relative_dir.as_posix(), item.architecture_name)):
+        grouped.setdefault(entry.slug, []).append(entry)
+    return list(grouped.values())
+
+
+def _display_architecture_name(name: str) -> str:
+    return name or "default"
+
+
+def _entry_label(entry: ReleaseEntry) -> str:
+    arch = _display_architecture_name(entry.architecture_name)
+    return f"{entry.module_name} / {arch}"
+
+
+def _entry_log_link(entry: ReleaseEntry, from_target: Path) -> str:
+    anchor = _heading_anchor(_display_architecture_name(entry.architecture_name))
+    return f"{_relative_doc_link(from_target, entry.log_target)}#{anchor}"
+
+
+def _build_release_entry(
+    *,
+    manifest_path: Path,
+    module_relative_dir: Path,
+    module_name: str,
+    module_summary: str,
+    owner: str,
+    architecture_name: str,
+    architecture_summary: str,
+    version_data: dict[str, object],
+    architecture_data: dict[str, object],
+    raw_history: list[dict[str, object]],
+    home_setting: str,
+    slug: str,
+    log_target: Path,
+) -> ReleaseEntry:
+    version = _as_string(version_data.get("current"))
+    if not version:
+        raise SystemExit(
+            "Missing current version for "
+            f"{manifest_path.relative_to(ROOT_DIR).as_posix()} / {architecture_name}"
+        )
+
+    home_source = _resolve_release_home_source(
+        manifest_path.parent,
+        home_setting,
+    )
+    home_target = _target_relative_path(home_source) if home_source is not None else None
+    home_route = _route_from_target(home_target) if home_target is not None else None
+    history = _build_history_items(
+        module_name,
+        architecture_name,
+        version_data,
+        architecture_data,
+        raw_history,
+    )
+
+    return ReleaseEntry(
+        manifest_path=manifest_path,
+        module_relative_dir=module_relative_dir,
+        module_name=module_name,
+        module_summary=module_summary,
+        owner=owner,
+        architecture_name=architecture_name,
+        architecture_summary=architecture_summary,
+        version=version,
+        channel=_as_string(version_data.get("channel"), "stable"),
+        released_at=_as_string(version_data.get("released_at")),
+        release_notes=_as_string(version_data.get("notes")),
+        architecture_style=_as_string(architecture_data.get("style")),
+        runtime=_as_string(architecture_data.get("runtime")),
+        entrypoints=_as_string_list(architecture_data.get("entrypoints")),
+        interfaces=_as_string_list(architecture_data.get("interfaces")),
+        platforms=_as_string_list(architecture_data.get("platforms")),
+        dependencies=_as_string_list(architecture_data.get("dependencies")),
+        architecture_notes=_as_string(architecture_data.get("notes")),
+        home_target=home_target,
+        home_route=home_route,
+        slug=slug,
+        log_target=log_target,
+        log_route=_route_from_target(log_target),
+        history=history,
+    )
+
+
 def _collect_release_entries() -> list[ReleaseEntry]:
     entries: list[ReleaseEntry] = []
     occupied_slugs: set[str] = set()
@@ -388,22 +490,14 @@ def _collect_release_entries() -> list[ReleaseEntry]:
         version_data = data.get("version", {})
         architecture_data = data.get("architecture", {})
         raw_history = _as_table_list(data.get("history"))
+        raw_architectures = _as_table_list(data.get("architectures"))
 
         module_relative_dir = manifest_path.parent.relative_to(APP_DIR)
         default_name = module_relative_dir.as_posix() if module_relative_dir != Path(".") else "app"
         module_name = _as_string(module_data.get("name"), default_name)
-        version = _as_string(version_data.get("current"))
-        if not version:
-            raise SystemExit(
-                f"Missing version.current in {manifest_path.relative_to(ROOT_DIR).as_posix()}"
-            )
-
-        home_source = _resolve_release_home_source(
-            manifest_path.parent,
-            _as_string(module_data.get("home")),
-        )
-        home_target = _target_relative_path(home_source) if home_source is not None else None
-        home_route = _route_from_target(home_target) if home_target is not None else None
+        module_summary = _as_string(module_data.get("summary"))
+        owner = _as_string(module_data.get("owner"))
+        module_home = _as_string(module_data.get("home"))
         slug_source = module_relative_dir.as_posix() if module_relative_dir != Path(".") else module_name
         slug = _slugify(slug_source)
         if slug in occupied_slugs:
@@ -411,32 +505,82 @@ def _collect_release_entries() -> list[ReleaseEntry]:
         occupied_slugs.add(slug)
 
         log_target = RELEASE_MODULE_LOGS_DIR / f"{slug}.md"
-        history = _build_history_items(module_name, version_data, architecture_data, raw_history)
 
+        if raw_architectures:
+            if version_data or architecture_data or raw_history:
+                raise SystemExit(
+                    "Do not mix legacy [version]/[architecture]/[[history]] with [[architectures]] in "
+                    f"{manifest_path.relative_to(ROOT_DIR).as_posix()}"
+                )
+
+            seen_architectures: set[str] = set()
+            for raw_architecture in raw_architectures:
+                architecture_name = _as_string(raw_architecture.get("name"))
+                if not architecture_name:
+                    raise SystemExit(
+                        f"Missing architectures.name in {manifest_path.relative_to(ROOT_DIR).as_posix()}"
+                    )
+                if architecture_name in seen_architectures:
+                    raise SystemExit(
+                        f"Duplicate architectures.name `{architecture_name}` in "
+                        f"{manifest_path.relative_to(ROOT_DIR).as_posix()}"
+                    )
+                seen_architectures.add(architecture_name)
+
+                architecture_summary = _as_string(raw_architecture.get("summary"))
+                architecture_version_data = {
+                    "current": raw_architecture.get("current"),
+                    "channel": raw_architecture.get("channel"),
+                    "released_at": raw_architecture.get("released_at"),
+                    "notes": raw_architecture.get("notes"),
+                }
+                architecture_runtime_data = {
+                    "style": raw_architecture.get("style"),
+                    "runtime": raw_architecture.get("runtime"),
+                    "entrypoints": raw_architecture.get("entrypoints"),
+                    "interfaces": raw_architecture.get("interfaces"),
+                    "platforms": raw_architecture.get("platforms"),
+                    "dependencies": raw_architecture.get("dependencies"),
+                    "notes": raw_architecture.get("architecture_notes"),
+                }
+                architecture_history = _as_table_list(raw_architecture.get("history"))
+                architecture_home = _as_string(raw_architecture.get("home"), module_home)
+
+                entries.append(
+                    _build_release_entry(
+                        manifest_path=manifest_path,
+                        module_relative_dir=module_relative_dir,
+                        module_name=module_name,
+                        module_summary=module_summary,
+                        owner=owner,
+                        architecture_name=architecture_name,
+                        architecture_summary=architecture_summary,
+                        version_data=architecture_version_data,
+                        architecture_data=architecture_runtime_data,
+                        raw_history=architecture_history,
+                        home_setting=architecture_home,
+                        slug=slug,
+                        log_target=log_target,
+                    )
+                )
+            continue
+
+        architecture_name = _as_string(architecture_data.get("name"), "default")
         entries.append(
-            ReleaseEntry(
+            _build_release_entry(
                 manifest_path=manifest_path,
                 module_relative_dir=module_relative_dir,
                 module_name=module_name,
-                module_summary=_as_string(module_data.get("summary")),
-                owner=_as_string(module_data.get("owner")),
-                version=version,
-                channel=_as_string(version_data.get("channel"), "stable"),
-                released_at=_as_string(version_data.get("released_at")),
-                release_notes=_as_string(version_data.get("notes")),
-                architecture_style=_as_string(architecture_data.get("style")),
-                runtime=_as_string(architecture_data.get("runtime")),
-                entrypoints=_as_string_list(architecture_data.get("entrypoints")),
-                interfaces=_as_string_list(architecture_data.get("interfaces")),
-                platforms=_as_string_list(architecture_data.get("platforms")),
-                dependencies=_as_string_list(architecture_data.get("dependencies")),
-                architecture_notes=_as_string(architecture_data.get("notes")),
-                home_target=home_target,
-                home_route=home_route,
+                module_summary=module_summary,
+                owner=owner,
+                architecture_name=architecture_name,
+                architecture_summary="",
+                version_data=version_data,
+                architecture_data=architecture_data,
+                raw_history=raw_history,
+                home_setting=module_home,
                 slug=slug,
                 log_target=log_target,
-                log_route=_route_from_target(log_target),
-                history=history,
             )
         )
 
@@ -445,8 +589,8 @@ def _collect_release_entries() -> list[ReleaseEntry]:
 
 def _build_release_table(entries: list[ReleaseEntry], from_target: Path) -> list[str]:
     lines = [
-        "| 模块 | 版本 | 通道 | 架构 | 运行时 | 发布时间 |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- |",
+        "| 工具 | 架构线 | 版本 | 通道 | 架构形态 | 运行时 | 发布时间 |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
 
     for entry in entries:
@@ -457,6 +601,7 @@ def _build_release_table(entries: list[ReleaseEntry], from_target: Path) -> list
         lines.append(
             "| "
             f"{module_label} | "
+            f"`{_display_architecture_name(entry.architecture_name)}` | "
             f"`{entry.version}` | "
             f"`{entry.channel}` | "
             f"{entry.architecture_style or '-'} | "
@@ -474,17 +619,18 @@ def _build_history_table(
     limit: int | None = None,
 ) -> list[str]:
     lines = [
-        "| 日期 | 模块 | 版本 | 通道 | 标题 |",
-        "| :--- | :--- | :--- | :--- | :--- |",
+        "| 日期 | 工具 | 架构线 | 版本 | 通道 | 标题 |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
 
     subset = records if limit is None else records[:limit]
     for entry, item in subset:
-        module_label = f"[{entry.module_name}]({_relative_doc_link(from_target, entry.log_target)})"
+        module_label = f"[{entry.module_name}]({_entry_log_link(entry, from_target)})"
         lines.append(
             "| "
             f"{item.released_at or '-'} | "
             f"{module_label} | "
+            f"`{_display_architecture_name(entry.architecture_name)}` | "
             f"`{item.version}` | "
             f"`{item.channel}` | "
             f"{item.title or '-'} |"
@@ -503,11 +649,12 @@ def _append_history_item_details(
 ) -> None:
     lines.extend(
         [
-            f"{heading_level} {entry.module_name} v{item.version}",
+            f"{heading_level} {entry.module_name} / {_display_architecture_name(entry.architecture_name)} v{item.version}",
             "",
             f"- 发布时间: `{item.released_at or '-'}`",
             f"- 发布通道: `{item.channel}`",
-            f"- 模块日志: [{entry.log_route}]({_relative_doc_link(from_target, entry.log_target)})",
+            f"- 架构线: `{_display_architecture_name(entry.architecture_name)}`",
+            f"- 模块日志: [{entry.log_route}]({_entry_log_link(entry, from_target)})",
         ]
     )
 
@@ -546,7 +693,8 @@ def _build_release_home_summary(entries: list[ReleaseEntry]) -> str:
     lines = [
         "> 该模块由 `build-docs` 自动生成，数据来源于各子模块目录下的 `release.toml`。",
         "",
-        f"- 模块总数: `{len(entries)}`",
+        f"- 工具总数: `{_tool_count(entries)}`",
+        f"- 架构线总数: `{len(entries)}`",
         f"- 发布通道: `{', '.join(f'{channel}={count}' for channel, count in sorted(counts.items()))}`",
         f"- 当前版本最近发布时间: `{_latest_release_date(entries)}`",
         f"- 历史记录数: `{_history_count(entries)}`",
@@ -571,13 +719,15 @@ def _build_release_home_summary(entries: list[ReleaseEntry]) -> str:
 def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     history_records = _all_history_records(entries)
+    grouped_entries = _group_release_entries(entries)
     lines = [
         "# 版本发布中心",
         "",
-        "> 该页面由 `build-docs` 自动生成，统一汇总各子模块的当前版本、发布时间、架构信息和发布日志入口。",
+        "> 该页面由 `build-docs` 自动生成，统一汇总各工具的当前版本、架构线、发布时间和发布日志入口。",
         "",
         f"- 生成时间: `{generated_at}`",
-        f"- 模块总数: `{len(entries)}`",
+        f"- 工具总数: `{_tool_count(entries)}`",
+        f"- 架构线总数: `{len(entries)}`",
         f"- 当前版本最近发布时间: `{_latest_release_date(entries)}`",
         f"- 历史记录数: `{_history_count(entries)}`",
         f"- 历史时间线最近发布时间: `{_latest_history_date(entries)}`",
@@ -602,45 +752,43 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
         ]
     )
     lines.extend(
-        f"- {entry.module_name} 发布日志: [{entry.log_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, entry.log_target)})"
-        for entry in entries
+        f"- {group[0].module_name} 发布日志: [{group[0].log_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, group[0].log_target)})"
+        for group in grouped_entries
     )
     lines.extend(["", "## 当前版本汇总", ""])
     lines.extend(_build_release_table(entries, RELEASE_CENTER_TARGET))
     if history_records:
         lines.extend(["", "## 最近发布", ""])
         lines.extend(_build_history_table(history_records, RELEASE_CENTER_TARGET, limit=10))
-    lines.extend(["", "## 模块明细", ""])
+    lines.extend(["", "## 工具明细", ""])
 
-    for entry in entries:
+    for group in grouped_entries:
+        primary = group[0]
         lines.extend(
             [
-                f"### {entry.module_name}",
+                f"### {primary.module_name}",
                 "",
-                f"- 模块目录: `app/{entry.module_relative_dir.as_posix()}`",
-                f"- 当前版本: `{entry.version}`",
-                f"- 发布通道: `{entry.channel}`",
-                f"- 发布时间: `{entry.released_at or '-'}`",
-                f"- 负责人: `{entry.owner or '-'}`",
-                f"- 架构形态: `{entry.architecture_style or '-'}`",
-                f"- 运行时: `{entry.runtime or '-'}`",
-                f"- 入口脚本: {_format_code_list(entry.entrypoints)}",
-                f"- 对外接口: {_format_code_list(entry.interfaces)}",
-                f"- 运行平台: {_format_code_list(entry.platforms)}",
-                f"- 依赖模块: {_format_code_list(entry.dependencies)}",
-                f"- 发布日志: [{entry.log_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, entry.log_target)})",
+                f"- 模块目录: `app/{primary.module_relative_dir.as_posix()}`",
+                f"- 负责人: `{primary.owner or '-'}`",
+                f"- 架构线数量: `{len(group)}`",
+                f"- 发布日志: [{primary.log_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, primary.log_target)})",
             ]
         )
-        if entry.home_target is not None:
+        if primary.home_target is not None:
             lines.append(
-                f"- 文档入口: [{entry.home_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, entry.home_target)})"
+                f"- 默认文档入口: [{primary.home_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, primary.home_target)})"
             )
-        if entry.module_summary:
-            lines.append(f"- 模块说明: {entry.module_summary}")
-        if entry.release_notes:
-            lines.append(f"- 发布说明: {entry.release_notes}")
-        if entry.architecture_notes:
-            lines.append(f"- 架构说明: {entry.architecture_notes}")
+        if primary.module_summary:
+            lines.append(f"- 模块说明: {primary.module_summary}")
+        lines.extend(["", "架构线:"])
+        for entry in group:
+            lines.append(
+                "- "
+                f"`{_display_architecture_name(entry.architecture_name)}` -> "
+                f"`{entry.version}` / `{entry.channel}` / "
+                f"{entry.architecture_style or '-'} / "
+                f"{entry.runtime or '-'}"
+            )
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
@@ -652,7 +800,7 @@ def _build_release_history_markdown(entries: list[ReleaseEntry]) -> str:
     lines = [
         "# 发布历史时间线",
         "",
-        "> 该页面由 `build-docs` 自动生成，按发布时间倒序汇总所有模块的版本历史。",
+        "> 该页面由 `build-docs` 自动生成，按发布时间倒序汇总所有工具/架构线的版本历史。",
         "",
         f"- 生成时间: `{generated_at}`",
         f"- 历史记录数: `{len(records)}`",
@@ -686,47 +834,82 @@ def _build_release_history_markdown(entries: list[ReleaseEntry]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _build_module_release_log_markdown(entry: ReleaseEntry) -> str:
+def _build_module_release_log_markdown(entries: list[ReleaseEntry]) -> str:
+    primary = entries[0]
     lines = [
-        f"# {entry.module_name} 发布日志",
+        f"# {primary.module_name} 发布日志",
         "",
-        "> 该页面由 `build-docs` 自动生成，展示当前模块的版本历史、变更项和架构备注。",
+        "> 该页面由 `build-docs` 自动生成，展示当前工具下各架构线的版本历史、变更项和架构备注。",
         "",
-        f"- 模块目录: `app/{entry.module_relative_dir.as_posix()}`",
-        f"- 当前版本: `{entry.version}`",
-        f"- 发布通道: `{entry.channel}`",
-        f"- 当前版本发布时间: `{entry.released_at or '-'}`",
-        f"- 历史记录数: `{len(entry.history)}`",
-        f"- 返回版本中心: [{_route_from_target(RELEASE_CENTER_TARGET)}]({_relative_doc_link(entry.log_target, RELEASE_CENTER_TARGET)})",
-        f"- 查看全局时间线: [{_route_from_target(RELEASE_HISTORY_TARGET)}]({_relative_doc_link(entry.log_target, RELEASE_HISTORY_TARGET)})",
+        f"- 模块目录: `app/{primary.module_relative_dir.as_posix()}`",
+        f"- 架构线数量: `{len(entries)}`",
+        f"- 历史记录数: `{sum(len(item.history) for item in entries)}`",
+        f"- 返回版本中心: [{_route_from_target(RELEASE_CENTER_TARGET)}]({_relative_doc_link(primary.log_target, RELEASE_CENTER_TARGET)})",
+        f"- 查看全局时间线: [{_route_from_target(RELEASE_HISTORY_TARGET)}]({_relative_doc_link(primary.log_target, RELEASE_HISTORY_TARGET)})",
     ]
 
-    if entry.home_target is not None and entry.home_route is not None:
+    if primary.home_target is not None and primary.home_route is not None:
         lines.append(
-            f"- 模块文档: [{entry.home_route}]({_relative_doc_link(entry.log_target, entry.home_target)})"
+            f"- 默认文档入口: [{primary.home_route}]({_relative_doc_link(primary.log_target, primary.home_target)})"
         )
-    if entry.module_summary:
-        lines.append(f"- 模块说明: {entry.module_summary}")
-    lines.extend(["", "## 版本概览", ""])
-    lines.extend(
-        _build_history_table([(entry, item) for item in entry.history], entry.log_target)
-    )
-    lines.extend(["", "## 版本明细", ""])
+    if primary.module_summary:
+        lines.append(f"- 模块说明: {primary.module_summary}")
+    lines.extend(["", "## 当前架构线", ""])
+    lines.extend(_build_release_table(entries, primary.log_target))
 
-    for item in entry.history:
-        _append_history_item_details(
-            lines,
-            from_target=entry.log_target,
-            entry=entry,
-            item=item,
-            heading_level="###",
+    for entry in entries:
+        lines.extend(
+            [
+                "",
+                f"## {_display_architecture_name(entry.architecture_name)}",
+                "",
+                f"- 当前版本: `{entry.version}`",
+                f"- 发布通道: `{entry.channel}`",
+                f"- 当前版本发布时间: `{entry.released_at or '-'}`",
+                f"- 架构形态: `{entry.architecture_style or '-'}`",
+                f"- 运行时: `{entry.runtime or '-'}`",
+                f"- 入口脚本: {_format_code_list(entry.entrypoints)}",
+                f"- 对外接口: {_format_code_list(entry.interfaces)}",
+                f"- 运行平台: {_format_code_list(entry.platforms)}",
+                f"- 依赖模块: {_format_code_list(entry.dependencies)}",
+            ]
         )
+        if entry.home_target is not None and entry.home_route is not None:
+            lines.append(
+                f"- 架构文档入口: [{entry.home_route}]({_relative_doc_link(primary.log_target, entry.home_target)})"
+            )
+        if entry.architecture_summary:
+            lines.append(f"- 架构摘要: {entry.architecture_summary}")
+        if entry.release_notes:
+            lines.append(f"- 当前版本说明: {entry.release_notes}")
+        if entry.architecture_notes:
+            lines.append(f"- 架构说明: {entry.architecture_notes}")
+
+        lines.extend(["", "### 历史概览", ""])
+        lines.extend(
+            _build_history_table([(entry, item) for item in entry.history], primary.log_target)
+        )
+        lines.extend(["", "### 历史明细", ""])
+
+        for item in entry.history:
+            _append_history_item_details(
+                lines,
+                from_target=primary.log_target,
+                entry=entry,
+                item=item,
+                heading_level="####",
+            )
 
     return "\n".join(lines).rstrip() + "\n"
 
 
 def _write_release_pages(entries: list[ReleaseEntry]) -> None:
-    generated_targets = [RELEASE_CENTER_TARGET, RELEASE_HISTORY_TARGET, *[entry.log_target for entry in entries]]
+    grouped_entries = _group_release_entries(entries)
+    generated_targets = [
+        RELEASE_CENTER_TARGET,
+        RELEASE_HISTORY_TARGET,
+        *[group[0].log_target for group in grouped_entries],
+    ]
     for target in generated_targets:
         target_path = DOCS_DIR / target
         if target_path.exists():
@@ -743,10 +926,10 @@ def _write_release_pages(entries: list[ReleaseEntry]) -> None:
     history_path.parent.mkdir(parents=True, exist_ok=True)
     history_path.write_text(_build_release_history_markdown(entries), encoding="utf-8")
 
-    for entry in entries:
-        module_log_path = DOCS_DIR / entry.log_target
+    for group in grouped_entries:
+        module_log_path = DOCS_DIR / group[0].log_target
         module_log_path.parent.mkdir(parents=True, exist_ok=True)
-        module_log_path.write_text(_build_module_release_log_markdown(entry), encoding="utf-8")
+        module_log_path.write_text(_build_module_release_log_markdown(group), encoding="utf-8")
 
 
 def _inject_release_summary_into_home(entries: list[ReleaseEntry]) -> None:
@@ -869,7 +1052,7 @@ def _print_release_entries(entries: list[ReleaseEntry]) -> None:
         route = entry.home_route or "-"
         print(
             f"{entry.manifest_path.relative_to(ROOT_DIR).as_posix()} -> "
-            f"{entry.module_name} "
+            f"{entry.module_name} / {_display_architecture_name(entry.architecture_name)} "
             f"(v{entry.version}, {entry.channel}, {route}, history={len(entry.history)})"
         )
 
@@ -880,7 +1063,7 @@ def build_cli() -> None:
     print(f"Built {len(routes)} markdown pages into {SITE_DIR}")
     print(
         "Aggregated "
-        f"{len(release_entries)} release manifests into "
+        f"{_tool_count(release_entries)} tools / {len(release_entries)} architecture lines into "
         f"{(DOCS_DIR / RELEASE_CENTER_TARGET).relative_to(ROOT_DIR).as_posix()}"
     )
     print(
@@ -900,7 +1083,9 @@ def scan_cli() -> None:
 def scan_releases_cli() -> None:
     entries = _collect_release_entries()
     counts = Counter(entry.channel for entry in entries)
-    print(f"Discovered {len(entries)} release manifests under {APP_DIR}")
+    print(
+        f"Discovered {_tool_count(entries)} tools / {len(entries)} architecture lines under {APP_DIR}"
+    )
     if counts:
         print(
             "Release channel stats: "
