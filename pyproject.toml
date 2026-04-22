@@ -18,6 +18,7 @@ dependencies = [
 [project.scripts]
 build-docs = "auto_docs.docsite:build_cli"
 scan-docs = "auto_docs.docsite:scan_cli"
+scan-releases = "auto_docs.docsite:scan_releases_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["auto_docs"]

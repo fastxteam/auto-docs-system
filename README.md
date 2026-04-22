@@ -49,6 +49,7 @@ app/
 ```powershell
 uv sync
 uv run scan-docs
+uv run scan-releases
 uv run build-docs
 ```
 
@@ -56,6 +57,46 @@ uv run build-docs
 
 ```text
 dist/html
+```
+
+## 版本发布管理
+
+每个子模块目录都可以放一个 `release.toml`，用来描述版本、发布通道和架构信息。  
+`uv run build-docs` 时会自动：
+
+- 扫描所有子模块的 `release.toml`
+- 生成 `release-center/index.html`
+- 把汇总统计注入首页的“版本发布总览”模块
+
+也可以单独执行：
+
+```powershell
+uv run scan-releases
+```
+
+示例：
+
+```toml
+[module]
+name = "scripts"
+summary = "脚本主模块"
+owner = "Platform Team"
+home = "README.md"
+
+[version]
+current = "1.3.0"
+channel = "stable"
+released_at = "2026-04-23"
+notes = "统一文档构建与版本汇总入口。"
+
+[architecture]
+style = "CLI + Batch"
+runtime = "Python 3.13"
+entrypoints = ["cleanup.py"]
+interfaces = ["CLI", "Markdown Docs"]
+platforms = ["Windows"]
+dependencies = []
+notes = "由 auto_docs 统一扫描和汇总。"
 ```
 
 ## 你最关心的两个问题

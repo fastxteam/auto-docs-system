@@ -1,0 +1,20 @@
+[module]
+name = "showcase"
+summary = "主题能力演示模块，用来验证扩展、插件和交叉引用的渲染效果。"
+owner = "Docs Team"
+home = "README.md"
+
+[version]
+current = "0.1.0"
+channel = "draft"
+released_at = "2026-04-23"
+notes = "演示页随主题能力演进持续调整，不对外承诺稳定接口。"
+
+[architecture]
+style = "Documentation Showcase"
+runtime = "MkDocs + Python 3.13"
+entrypoints = []
+interfaces = ["Static HTML", "Theme Preview"]
+platforms = ["Windows", "Offline HTML"]
+dependencies = ["scripts", "report"]
+notes = "主要承担样式验证和插件能力回归，不参与业务执行链路。"

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import os
 import shutil
 import sys
+import tomllib
+from collections import Counter
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 
@@ -13,6 +18,9 @@ SITE_DIR = ROOT_DIR / "dist" / "html"
 MKDOCS_CONFIG = ROOT_DIR / "mkdocs.yml"
 THEME_OVERRIDES_DIR = ROOT_DIR / "auto_docs" / "theme_overrides"
 USE_DIRECTORY_URLS = False
+RELEASE_MANIFEST_NAME = "release.toml"
+RELEASE_CENTER_TARGET = Path("release-center") / "index.md"
+HOME_RELEASE_PLACEHOLDER = "<!-- AUTO_DOCS:RELEASE_SUMMARY -->"
 
 IGNORED_PARTS = {
     ".doc_build",
@@ -25,11 +33,37 @@ IGNORED_PARTS = {
 IGNORED_SUFFIXES = {".py", ".pyc", ".pyo"}
 
 
+@dataclass(slots=True)
+class ReleaseEntry:
+    manifest_path: Path
+    module_relative_dir: Path
+    module_name: str
+    module_summary: str
+    owner: str
+    version: str
+    channel: str
+    released_at: str
+    release_notes: str
+    architecture_style: str
+    runtime: str
+    entrypoints: list[str]
+    interfaces: list[str]
+    platforms: list[str]
+    dependencies: list[str]
+    architecture_notes: str
+    home_target: Path | None
+    home_route: str | None
+
+
 def _is_hidden_or_ignored(relative_path: Path) -> bool:
     for part in relative_path.parts:
         if part in IGNORED_PARTS or part.startswith("."):
             return True
     return False
+
+
+def _is_release_manifest(relative_path: Path) -> bool:
+    return relative_path.name.lower() == RELEASE_MANIFEST_NAME
 
 
 def _iter_source_files() -> list[Path]:
@@ -42,6 +76,8 @@ def _iter_source_files() -> list[Path]:
             continue
         relative_path = path.relative_to(APP_DIR)
         if _is_hidden_or_ignored(relative_path):
+            continue
+        if _is_release_manifest(relative_path):
             continue
         if path.suffix.lower() in IGNORED_SUFFIXES:
             continue
@@ -116,8 +152,264 @@ def _prepare_source_manifest() -> tuple[list[Path], list[tuple[Path, str]]]:
     return source_files, markdown_routes
 
 
+def _as_string(value: object, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+def _as_string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        items: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                items.append(text)
+        return items
+    raise SystemExit(f"Unsupported list value in {RELEASE_MANIFEST_NAME}: {value!r}")
+
+
+def _iter_release_manifest_paths() -> list[Path]:
+    manifests: list[Path] = []
+    for path in APP_DIR.rglob(RELEASE_MANIFEST_NAME):
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(APP_DIR)
+        if _is_hidden_or_ignored(relative_path):
+            continue
+        manifests.append(path)
+    return sorted(manifests)
+
+
+def _resolve_release_home_source(module_dir: Path, configured_home: str) -> Path | None:
+    candidates: list[Path] = []
+    if configured_home:
+        candidates.append(module_dir / configured_home)
+    candidates.extend([module_dir / "README.md", module_dir / "index.md"])
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.exists() and candidate.is_file() and candidate.suffix.lower() == ".md":
+            return candidate
+    return None
+
+
+def _relative_doc_link(from_target: Path, to_target: Path) -> str:
+    start = "." if str(from_target.parent) == "." else str(from_target.parent)
+    return Path(os.path.relpath(str(to_target), start=start)).as_posix()
+
+
+def _format_code_list(items: list[str]) -> str:
+    if not items:
+        return "-"
+    return ", ".join(f"`{item}`" for item in items)
+
+
+def _latest_release_date(entries: list[ReleaseEntry]) -> str:
+    dates = sorted(entry.released_at for entry in entries if entry.released_at)
+    return dates[-1] if dates else "-"
+
+
+def _collect_release_entries() -> list[ReleaseEntry]:
+    entries: list[ReleaseEntry] = []
+
+    for manifest_path in _iter_release_manifest_paths():
+        data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        module_data = data.get("module", {})
+        version_data = data.get("version", {})
+        architecture_data = data.get("architecture", {})
+
+        module_relative_dir = manifest_path.parent.relative_to(APP_DIR)
+        default_name = module_relative_dir.as_posix() if module_relative_dir != Path(".") else "app"
+        module_name = _as_string(module_data.get("name"), default_name)
+        version = _as_string(version_data.get("current"))
+        if not version:
+            raise SystemExit(
+                f"Missing version.current in {manifest_path.relative_to(ROOT_DIR).as_posix()}"
+            )
+
+        home_source = _resolve_release_home_source(
+            manifest_path.parent,
+            _as_string(module_data.get("home")),
+        )
+        home_target = _target_relative_path(home_source) if home_source is not None else None
+        home_route = _route_from_target(home_target) if home_target is not None else None
+
+        entries.append(
+            ReleaseEntry(
+                manifest_path=manifest_path,
+                module_relative_dir=module_relative_dir,
+                module_name=module_name,
+                module_summary=_as_string(module_data.get("summary")),
+                owner=_as_string(module_data.get("owner")),
+                version=version,
+                channel=_as_string(version_data.get("channel"), "stable"),
+                released_at=_as_string(version_data.get("released_at")),
+                release_notes=_as_string(version_data.get("notes")),
+                architecture_style=_as_string(architecture_data.get("style")),
+                runtime=_as_string(architecture_data.get("runtime")),
+                entrypoints=_as_string_list(architecture_data.get("entrypoints")),
+                interfaces=_as_string_list(architecture_data.get("interfaces")),
+                platforms=_as_string_list(architecture_data.get("platforms")),
+                dependencies=_as_string_list(architecture_data.get("dependencies")),
+                architecture_notes=_as_string(architecture_data.get("notes")),
+                home_target=home_target,
+                home_route=home_route,
+            )
+        )
+
+    return entries
+
+
+def _build_release_table(entries: list[ReleaseEntry], from_target: Path) -> list[str]:
+    lines = [
+        "| 模块 | 版本 | 通道 | 架构 | 运行时 | 发布时间 |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- |",
+    ]
+
+    for entry in entries:
+        module_label = entry.module_name
+        if entry.home_target is not None:
+            module_label = f"[{entry.module_name}]({_relative_doc_link(from_target, entry.home_target)})"
+
+        lines.append(
+            "| "
+            f"{module_label} | "
+            f"`{entry.version}` | "
+            f"`{entry.channel}` | "
+            f"{entry.architecture_style or '-'} | "
+            f"{entry.runtime or '-'} | "
+            f"{entry.released_at or '-'} |"
+        )
+
+    return lines
+
+
+def _build_release_home_summary(entries: list[ReleaseEntry]) -> str:
+    if not entries:
+        return (
+            "> 当前未发现任何 `release.toml`。在子模块目录下添加该文件后，"
+            "重新运行 `uv run build-docs` 即可自动汇总。"
+        )
+
+    counts = Counter(entry.channel for entry in entries)
+    lines = [
+        "> 该模块由 `build-docs` 自动生成，数据来源于各子模块目录下的 `release.toml`。",
+        "",
+        f"- 模块总数: `{len(entries)}`",
+        f"- 发布通道: `{', '.join(f'{channel}={count}' for channel, count in sorted(counts.items()))}`",
+        f"- 最近发布时间: `{_latest_release_date(entries)}`",
+        "",
+    ]
+    lines.extend(_build_release_table(entries, Path("index.md")))
+    lines.extend(
+        [
+            "",
+            "更多详情见 [release-center/index.md](release-center/index.md)。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        "# 版本发布中心",
+        "",
+        "> 该页面由 `build-docs` 自动生成，统一汇总各子模块的版本信息、发布时间和架构信息。",
+        "",
+        f"- 生成时间: `{generated_at}`",
+        f"- 模块总数: `{len(entries)}`",
+        f"- 最近发布时间: `{_latest_release_date(entries)}`",
+        "",
+    ]
+
+    if not entries:
+        lines.append("当前未发现任何 `release.toml`。")
+        return "\n".join(lines)
+
+    counts = Counter(entry.channel for entry in entries)
+    lines.append(
+        "- 发布通道统计: "
+        + ", ".join(f"`{channel}`={count}" for channel, count in sorted(counts.items()))
+    )
+    lines.extend(["", "## 汇总表", ""])
+    lines.extend(_build_release_table(entries, RELEASE_CENTER_TARGET))
+    lines.extend(["", "## 模块明细", ""])
+
+    for entry in entries:
+        lines.extend(
+            [
+                f"### {entry.module_name}",
+                "",
+                f"- 模块目录: `app/{entry.module_relative_dir.as_posix()}`",
+                f"- 当前版本: `{entry.version}`",
+                f"- 发布通道: `{entry.channel}`",
+                f"- 发布时间: `{entry.released_at or '-'}`",
+                f"- 负责人: `{entry.owner or '-'}`",
+                f"- 架构形态: `{entry.architecture_style or '-'}`",
+                f"- 运行时: `{entry.runtime or '-'}`",
+                f"- 入口脚本: {_format_code_list(entry.entrypoints)}",
+                f"- 对外接口: {_format_code_list(entry.interfaces)}",
+                f"- 运行平台: {_format_code_list(entry.platforms)}",
+                f"- 依赖模块: {_format_code_list(entry.dependencies)}",
+            ]
+        )
+        if entry.home_target is not None:
+            lines.append(
+                f"- 文档入口: [{entry.home_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, entry.home_target)})"
+            )
+        if entry.module_summary:
+            lines.append(f"- 模块说明: {entry.module_summary}")
+        if entry.release_notes:
+            lines.append(f"- 发布说明: {entry.release_notes}")
+        if entry.architecture_notes:
+            lines.append(f"- 架构说明: {entry.architecture_notes}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _write_release_center_page(entries: list[ReleaseEntry]) -> None:
+    target_path = DOCS_DIR / RELEASE_CENTER_TARGET
+    if target_path.exists():
+        raise SystemExit(
+            "Generated release center conflicts with an existing document: "
+            f"{target_path.relative_to(ROOT_DIR).as_posix()}"
+        )
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(_build_release_center_markdown(entries), encoding="utf-8")
+
+
+def _inject_release_summary_into_home(entries: list[ReleaseEntry]) -> None:
+    home_path = DOCS_DIR / "index.md"
+    if not home_path.exists():
+        return
+
+    content = home_path.read_text(encoding="utf-8")
+    summary = _build_release_home_summary(entries)
+
+    if HOME_RELEASE_PLACEHOLDER in content:
+        updated = content.replace(HOME_RELEASE_PLACEHOLDER, summary)
+    else:
+        suffix = "" if content.endswith("\n") else "\n"
+        updated = content + suffix + "\n## 版本发布总览\n\n" + summary + "\n"
+
+    home_path.write_text(updated, encoding="utf-8")
+
+
 def stage_docs() -> list[tuple[Path, str]]:
     source_files, markdown_routes = _prepare_source_manifest()
+    release_entries = _collect_release_entries()
 
     if BUILD_ROOT.exists():
         shutil.rmtree(BUILD_ROOT)
@@ -128,6 +420,9 @@ def stage_docs() -> list[tuple[Path, str]]:
         target_path = DOCS_DIR / target_relative
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, target_path)
+
+    _write_release_center_page(release_entries)
+    _inject_release_summary_into_home(release_entries)
 
     return markdown_routes
 
@@ -210,9 +505,25 @@ def _print_routes(routes: list[tuple[Path, str]]) -> None:
         print(f"{source_path.as_posix()} -> {route}")
 
 
+def _print_release_entries(entries: list[ReleaseEntry]) -> None:
+    for entry in entries:
+        route = entry.home_route or "-"
+        print(
+            f"{entry.manifest_path.relative_to(ROOT_DIR).as_posix()} -> "
+            f"{entry.module_name} "
+            f"(v{entry.version}, {entry.channel}, {route})"
+        )
+
+
 def build_cli() -> None:
     routes = build_site()
+    release_entries = _collect_release_entries()
     print(f"Built {len(routes)} markdown pages into {SITE_DIR}")
+    print(
+        "Aggregated "
+        f"{len(release_entries)} release manifests into "
+        f"{(DOCS_DIR / RELEASE_CENTER_TARGET).relative_to(ROOT_DIR).as_posix()}"
+    )
     _print_routes(routes)
 
 
@@ -220,6 +531,20 @@ def scan_cli() -> None:
     _, routes = _prepare_source_manifest()
     print(f"Discovered {len(routes)} markdown pages under {APP_DIR}")
     _print_routes(routes)
+
+
+def scan_releases_cli() -> None:
+    entries = _collect_release_entries()
+    counts = Counter(entry.channel for entry in entries)
+    print(f"Discovered {len(entries)} release manifests under {APP_DIR}")
+    if counts:
+        print(
+            "Release channel stats: "
+            + ", ".join(f"{channel}={count}" for channel, count in sorted(counts.items()))
+        )
+    else:
+        print("Release channel stats: none")
+    _print_release_entries(entries)
 
 
 def main() -> None:
@@ -230,7 +555,10 @@ def main() -> None:
     if command == "scan":
         scan_cli()
         return
-    raise SystemExit("Usage: python -m auto_docs.docsite [build|scan]")
+    if command == "scan-releases":
+        scan_releases_cli()
+        return
+    raise SystemExit("Usage: python -m auto_docs.docsite [build|scan|scan-releases]")
 
 
 if __name__ == "__main__":

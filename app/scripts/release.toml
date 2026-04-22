@@ -1,0 +1,20 @@
+[module]
+name = "scripts"
+summary = "脚本主模块，负责清理任务、批处理入口和文档汇总。"
+owner = "Platform Team"
+home = "README.md"
+
+[version]
+current = "1.3.0"
+channel = "stable"
+released_at = "2026-04-23"
+notes = "统一文档构建、版本汇总和首页自动统计入口。"
+
+[architecture]
+style = "CLI + Batch"
+runtime = "Python 3.13"
+entrypoints = ["cleanup.py"]
+interfaces = ["CLI", "Markdown Docs"]
+platforms = ["Windows"]
+dependencies = []
+notes = "脚本和说明文档同目录维护，由 auto_docs 负责扫描和汇总。"

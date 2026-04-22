@@ -1,0 +1,20 @@
+[module]
+name = "report"
+summary = "报表子模块，负责沉淀统计页面和输出说明。"
+owner = "Data Ops"
+home = "README.md"
+
+[version]
+current = "0.4.2"
+channel = "beta"
+released_at = "2026-04-22"
+notes = "正在补齐报表脚本与导出链路，先以文档方式管理接口和版本。"
+
+[architecture]
+style = "Reporting Pipeline"
+runtime = "Python 3.13"
+entrypoints = []
+interfaces = ["Static Docs", "Batch Report"]
+platforms = ["Windows"]
+dependencies = ["scripts"]
+notes = "作为 scripts 下的子模块，重点沉淀统计口径、导出流程和版本记录。"

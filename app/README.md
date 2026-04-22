@@ -16,6 +16,10 @@
 3. 功能说明用单独的 `*.md`
 4. 执行 `uv run build-docs`
 
+## 版本发布总览
+
+<!-- AUTO_DOCS:RELEASE_SUMMARY -->
+
 ## 能力示例
 
 - `mkdocs-shadcn-lwq` 扩展与插件示例：见 [showcase/index.md](showcase/index.md)
