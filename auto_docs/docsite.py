@@ -8,6 +8,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import re
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -20,6 +21,8 @@ THEME_OVERRIDES_DIR = ROOT_DIR / "auto_docs" / "theme_overrides"
 USE_DIRECTORY_URLS = False
 RELEASE_MANIFEST_NAME = "release.toml"
 RELEASE_CENTER_TARGET = Path("release-center") / "index.md"
+RELEASE_HISTORY_TARGET = Path("release-center") / "history" / "index.md"
+RELEASE_MODULE_LOGS_DIR = Path("release-center") / "modules"
 HOME_RELEASE_PLACEHOLDER = "<!-- AUTO_DOCS:RELEASE_SUMMARY -->"
 
 IGNORED_PARTS = {
@@ -53,6 +56,23 @@ class ReleaseEntry:
     architecture_notes: str
     home_target: Path | None
     home_route: str | None
+    slug: str
+    log_target: Path
+    log_route: str
+    history: list["ReleaseHistoryItem"]
+
+
+@dataclass(slots=True)
+class ReleaseHistoryItem:
+    version: str
+    channel: str
+    released_at: str
+    title: str
+    summary: str
+    changes: list[str]
+    breaking_changes: list[str]
+    architecture_notes: str
+    is_current: bool
 
 
 def _is_hidden_or_ignored(relative_path: Path) -> bool:
@@ -174,6 +194,53 @@ def _as_string_list(value: object) -> list[str]:
     raise SystemExit(f"Unsupported list value in {RELEASE_MANIFEST_NAME}: {value!r}")
 
 
+def _as_table_list(value: object) -> list[dict[str, object]]:
+    if value is None:
+        return []
+    if isinstance(value, list) and all(isinstance(item, dict) for item in value):
+        return value
+    raise SystemExit(
+        f"Unsupported history value in {RELEASE_MANIFEST_NAME}: expected array of tables, got {value!r}"
+    )
+
+
+def _slugify(text: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
+    return slug or "release"
+
+
+def _parse_release_datetime(value: str) -> datetime | None:
+    text = value.strip()
+    if not text:
+        return None
+
+    candidates = [text]
+    if text.endswith("Z"):
+        candidates.append(text[:-1] + "+00:00")
+
+    for candidate in candidates:
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+
+    return None
+
+
+def _history_sort_key(item: "ReleaseHistoryItem") -> tuple[datetime, str, str]:
+    return (
+        _parse_release_datetime(item.released_at) or datetime.min,
+        item.version,
+        item.title,
+    )
+
+
 def _iter_release_manifest_paths() -> list[Path]:
     manifests: list[Path] = []
     for path in APP_DIR.rglob(RELEASE_MANIFEST_NAME):
@@ -218,14 +285,109 @@ def _latest_release_date(entries: list[ReleaseEntry]) -> str:
     return dates[-1] if dates else "-"
 
 
+def _latest_history_date(entries: list[ReleaseEntry]) -> str:
+    dates = sorted(
+        item.released_at
+        for entry in entries
+        for item in entry.history
+        if item.released_at
+    )
+    return dates[-1] if dates else "-"
+
+
+def _build_history_items(
+    module_name: str,
+    version_data: dict[str, object],
+    architecture_data: dict[str, object],
+    raw_history: list[dict[str, object]],
+) -> list[ReleaseHistoryItem]:
+    current_version = _as_string(version_data.get("current"))
+    current_channel = _as_string(version_data.get("channel"), "stable")
+    current_released_at = _as_string(version_data.get("released_at"))
+    current_notes = _as_string(version_data.get("notes"))
+    current_architecture_notes = _as_string(architecture_data.get("notes"))
+
+    history_items: list[ReleaseHistoryItem] = []
+    seen_versions: set[str] = set()
+
+    for raw_item in raw_history:
+        version = _as_string(raw_item.get("version"))
+        if not version:
+            raise SystemExit(
+                f"Missing history.version in {RELEASE_MANIFEST_NAME} for module {module_name}"
+            )
+        if version in seen_versions:
+            raise SystemExit(
+                f"Duplicate history.version `{version}` in {RELEASE_MANIFEST_NAME} for module {module_name}"
+            )
+        seen_versions.add(version)
+
+        is_current = version == current_version
+        history_items.append(
+            ReleaseHistoryItem(
+                version=version,
+                channel=_as_string(
+                    raw_item.get("channel"),
+                    current_channel if is_current else "stable",
+                ),
+                released_at=_as_string(
+                    raw_item.get("released_at"),
+                    current_released_at if is_current else "",
+                ),
+                title=_as_string(raw_item.get("title"), f"{module_name} {version}"),
+                summary=_as_string(
+                    raw_item.get("summary"),
+                    _as_string(raw_item.get("notes"), current_notes if is_current else ""),
+                ),
+                changes=_as_string_list(raw_item.get("changes")),
+                breaking_changes=_as_string_list(raw_item.get("breaking_changes")),
+                architecture_notes=_as_string(
+                    raw_item.get("architecture_notes"),
+                    current_architecture_notes if is_current else "",
+                ),
+                is_current=is_current,
+            )
+        )
+
+    if current_version and current_version not in seen_versions:
+        history_items.append(
+            ReleaseHistoryItem(
+                version=current_version,
+                channel=current_channel,
+                released_at=current_released_at,
+                title=f"{module_name} {current_version}",
+                summary=current_notes,
+                changes=[],
+                breaking_changes=[],
+                architecture_notes=current_architecture_notes,
+                is_current=True,
+            )
+        )
+
+    history_items.sort(key=_history_sort_key, reverse=True)
+    return history_items
+
+
+def _all_history_records(entries: list[ReleaseEntry]) -> list[tuple[ReleaseEntry, ReleaseHistoryItem]]:
+    records = [(entry, item) for entry in entries for item in entry.history]
+    records.sort(key=lambda pair: _history_sort_key(pair[1]), reverse=True)
+    return records
+
+
+def _history_count(entries: list[ReleaseEntry]) -> int:
+    return sum(len(entry.history) for entry in entries)
+
+
 def _collect_release_entries() -> list[ReleaseEntry]:
     entries: list[ReleaseEntry] = []
+    occupied_slugs: set[str] = set()
 
     for manifest_path in _iter_release_manifest_paths():
         data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
         module_data = data.get("module", {})
         version_data = data.get("version", {})
         architecture_data = data.get("architecture", {})
+        raw_history = _as_table_list(data.get("history"))
 
         module_relative_dir = manifest_path.parent.relative_to(APP_DIR)
         default_name = module_relative_dir.as_posix() if module_relative_dir != Path(".") else "app"
@@ -242,6 +404,14 @@ def _collect_release_entries() -> list[ReleaseEntry]:
         )
         home_target = _target_relative_path(home_source) if home_source is not None else None
         home_route = _route_from_target(home_target) if home_target is not None else None
+        slug_source = module_relative_dir.as_posix() if module_relative_dir != Path(".") else module_name
+        slug = _slugify(slug_source)
+        if slug in occupied_slugs:
+            raise SystemExit(f"Duplicate generated release log slug `{slug}`")
+        occupied_slugs.add(slug)
+
+        log_target = RELEASE_MODULE_LOGS_DIR / f"{slug}.md"
+        history = _build_history_items(module_name, version_data, architecture_data, raw_history)
 
         entries.append(
             ReleaseEntry(
@@ -263,6 +433,10 @@ def _collect_release_entries() -> list[ReleaseEntry]:
                 architecture_notes=_as_string(architecture_data.get("notes")),
                 home_target=home_target,
                 home_route=home_route,
+                slug=slug,
+                log_target=log_target,
+                log_route=_route_from_target(log_target),
+                history=history,
             )
         )
 
@@ -293,6 +467,73 @@ def _build_release_table(entries: list[ReleaseEntry], from_target: Path) -> list
     return lines
 
 
+def _build_history_table(
+    records: list[tuple[ReleaseEntry, ReleaseHistoryItem]],
+    from_target: Path,
+    *,
+    limit: int | None = None,
+) -> list[str]:
+    lines = [
+        "| 日期 | 模块 | 版本 | 通道 | 标题 |",
+        "| :--- | :--- | :--- | :--- | :--- |",
+    ]
+
+    subset = records if limit is None else records[:limit]
+    for entry, item in subset:
+        module_label = f"[{entry.module_name}]({_relative_doc_link(from_target, entry.log_target)})"
+        lines.append(
+            "| "
+            f"{item.released_at or '-'} | "
+            f"{module_label} | "
+            f"`{item.version}` | "
+            f"`{item.channel}` | "
+            f"{item.title or '-'} |"
+        )
+
+    return lines
+
+
+def _append_history_item_details(
+    lines: list[str],
+    *,
+    from_target: Path,
+    entry: ReleaseEntry,
+    item: ReleaseHistoryItem,
+    heading_level: str,
+) -> None:
+    lines.extend(
+        [
+            f"{heading_level} {entry.module_name} v{item.version}",
+            "",
+            f"- 发布时间: `{item.released_at or '-'}`",
+            f"- 发布通道: `{item.channel}`",
+            f"- 模块日志: [{entry.log_route}]({_relative_doc_link(from_target, entry.log_target)})",
+        ]
+    )
+
+    if entry.home_target is not None and entry.home_route is not None:
+        lines.append(
+            f"- 模块文档: [{entry.home_route}]({_relative_doc_link(from_target, entry.home_target)})"
+        )
+
+    if item.title:
+        lines.append(f"- 标题: {item.title}")
+    if item.summary:
+        lines.append(f"- 摘要: {item.summary}")
+    if item.architecture_notes:
+        lines.append(f"- 架构备注: {item.architecture_notes}")
+
+    if item.changes:
+        lines.extend(["", "变更内容:"])
+        lines.extend(f"- {change}" for change in item.changes)
+
+    if item.breaking_changes:
+        lines.extend(["", "兼容性变更:"])
+        lines.extend(f"- {change}" for change in item.breaking_changes)
+
+    lines.append("")
+
+
 def _build_release_home_summary(entries: list[ReleaseEntry]) -> str:
     if not entries:
         return (
@@ -301,19 +542,27 @@ def _build_release_home_summary(entries: list[ReleaseEntry]) -> str:
         )
 
     counts = Counter(entry.channel for entry in entries)
+    history_records = _all_history_records(entries)
     lines = [
         "> 该模块由 `build-docs` 自动生成，数据来源于各子模块目录下的 `release.toml`。",
         "",
         f"- 模块总数: `{len(entries)}`",
         f"- 发布通道: `{', '.join(f'{channel}={count}' for channel, count in sorted(counts.items()))}`",
-        f"- 最近发布时间: `{_latest_release_date(entries)}`",
+        f"- 当前版本最近发布时间: `{_latest_release_date(entries)}`",
+        f"- 历史记录数: `{_history_count(entries)}`",
+        f"- 历史时间线最近发布时间: `{_latest_history_date(entries)}`",
         "",
     ]
+    lines.extend(["当前版本汇总:"])
+    lines.append("")
     lines.extend(_build_release_table(entries, Path("index.md")))
+    if history_records:
+        lines.extend(["", "最近发布:",""])
+        lines.extend(_build_history_table(history_records, Path("index.md"), limit=5))
     lines.extend(
         [
             "",
-            "更多详情见 [release-center/index.md](release-center/index.md)。",
+            "更多详情见 [release-center/index.md](release-center/index.md) 和 [release-center/history/index.md](release-center/history/index.md)。",
         ]
     )
     return "\n".join(lines)
@@ -321,14 +570,17 @@ def _build_release_home_summary(entries: list[ReleaseEntry]) -> str:
 
 def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    history_records = _all_history_records(entries)
     lines = [
         "# 版本发布中心",
         "",
-        "> 该页面由 `build-docs` 自动生成，统一汇总各子模块的版本信息、发布时间和架构信息。",
+        "> 该页面由 `build-docs` 自动生成，统一汇总各子模块的当前版本、发布时间、架构信息和发布日志入口。",
         "",
         f"- 生成时间: `{generated_at}`",
         f"- 模块总数: `{len(entries)}`",
-        f"- 最近发布时间: `{_latest_release_date(entries)}`",
+        f"- 当前版本最近发布时间: `{_latest_release_date(entries)}`",
+        f"- 历史记录数: `{_history_count(entries)}`",
+        f"- 历史时间线最近发布时间: `{_latest_history_date(entries)}`",
         "",
     ]
 
@@ -341,8 +593,23 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
         "- 发布通道统计: "
         + ", ".join(f"`{channel}`={count}" for channel, count in sorted(counts.items()))
     )
-    lines.extend(["", "## 汇总表", ""])
+    lines.extend(
+        [
+            "",
+            "## 导航",
+            "",
+            f"- 全局历史时间线: [release-center/history/index.md]({_relative_doc_link(RELEASE_CENTER_TARGET, RELEASE_HISTORY_TARGET)})",
+        ]
+    )
+    lines.extend(
+        f"- {entry.module_name} 发布日志: [{entry.log_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, entry.log_target)})"
+        for entry in entries
+    )
+    lines.extend(["", "## 当前版本汇总", ""])
     lines.extend(_build_release_table(entries, RELEASE_CENTER_TARGET))
+    if history_records:
+        lines.extend(["", "## 最近发布", ""])
+        lines.extend(_build_history_table(history_records, RELEASE_CENTER_TARGET, limit=10))
     lines.extend(["", "## 模块明细", ""])
 
     for entry in entries:
@@ -361,6 +628,7 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
                 f"- 对外接口: {_format_code_list(entry.interfaces)}",
                 f"- 运行平台: {_format_code_list(entry.platforms)}",
                 f"- 依赖模块: {_format_code_list(entry.dependencies)}",
+                f"- 发布日志: [{entry.log_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, entry.log_target)})",
             ]
         )
         if entry.home_target is not None:
@@ -378,16 +646,107 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _write_release_center_page(entries: list[ReleaseEntry]) -> None:
-    target_path = DOCS_DIR / RELEASE_CENTER_TARGET
-    if target_path.exists():
-        raise SystemExit(
-            "Generated release center conflicts with an existing document: "
-            f"{target_path.relative_to(ROOT_DIR).as_posix()}"
+def _build_release_history_markdown(entries: list[ReleaseEntry]) -> str:
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    records = _all_history_records(entries)
+    lines = [
+        "# 发布历史时间线",
+        "",
+        "> 该页面由 `build-docs` 自动生成，按发布时间倒序汇总所有模块的版本历史。",
+        "",
+        f"- 生成时间: `{generated_at}`",
+        f"- 历史记录数: `{len(records)}`",
+        f"- 最近发布时间: `{_latest_history_date(entries)}`",
+        f"- 返回版本中心: [{_route_from_target(RELEASE_CENTER_TARGET)}]({_relative_doc_link(RELEASE_HISTORY_TARGET, RELEASE_CENTER_TARGET)})",
+        "",
+    ]
+
+    if not records:
+        lines.append("当前没有可展示的版本历史。")
+        return "\n".join(lines)
+
+    lines.extend(["## 最近发布", ""])
+    lines.extend(_build_history_table(records, RELEASE_HISTORY_TARGET, limit=20))
+    lines.extend(["", "## 时间线明细", ""])
+
+    current_date = None
+    for entry, item in records:
+        date_label = item.released_at or "未标注日期"
+        if date_label != current_date:
+            current_date = date_label
+            lines.extend([f"### {date_label}", ""])
+        _append_history_item_details(
+            lines,
+            from_target=RELEASE_HISTORY_TARGET,
+            entry=entry,
+            item=item,
+            heading_level="####",
         )
 
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(_build_release_center_markdown(entries), encoding="utf-8")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _build_module_release_log_markdown(entry: ReleaseEntry) -> str:
+    lines = [
+        f"# {entry.module_name} 发布日志",
+        "",
+        "> 该页面由 `build-docs` 自动生成，展示当前模块的版本历史、变更项和架构备注。",
+        "",
+        f"- 模块目录: `app/{entry.module_relative_dir.as_posix()}`",
+        f"- 当前版本: `{entry.version}`",
+        f"- 发布通道: `{entry.channel}`",
+        f"- 当前版本发布时间: `{entry.released_at or '-'}`",
+        f"- 历史记录数: `{len(entry.history)}`",
+        f"- 返回版本中心: [{_route_from_target(RELEASE_CENTER_TARGET)}]({_relative_doc_link(entry.log_target, RELEASE_CENTER_TARGET)})",
+        f"- 查看全局时间线: [{_route_from_target(RELEASE_HISTORY_TARGET)}]({_relative_doc_link(entry.log_target, RELEASE_HISTORY_TARGET)})",
+    ]
+
+    if entry.home_target is not None and entry.home_route is not None:
+        lines.append(
+            f"- 模块文档: [{entry.home_route}]({_relative_doc_link(entry.log_target, entry.home_target)})"
+        )
+    if entry.module_summary:
+        lines.append(f"- 模块说明: {entry.module_summary}")
+    lines.extend(["", "## 版本概览", ""])
+    lines.extend(
+        _build_history_table([(entry, item) for item in entry.history], entry.log_target)
+    )
+    lines.extend(["", "## 版本明细", ""])
+
+    for item in entry.history:
+        _append_history_item_details(
+            lines,
+            from_target=entry.log_target,
+            entry=entry,
+            item=item,
+            heading_level="###",
+        )
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _write_release_pages(entries: list[ReleaseEntry]) -> None:
+    generated_targets = [RELEASE_CENTER_TARGET, RELEASE_HISTORY_TARGET, *[entry.log_target for entry in entries]]
+    for target in generated_targets:
+        target_path = DOCS_DIR / target
+        if target_path.exists():
+            raise SystemExit(
+                "Generated release page conflicts with an existing document: "
+                f"{target_path.relative_to(ROOT_DIR).as_posix()}"
+            )
+
+    center_path = DOCS_DIR / RELEASE_CENTER_TARGET
+    center_path.parent.mkdir(parents=True, exist_ok=True)
+    center_path.write_text(_build_release_center_markdown(entries), encoding="utf-8")
+
+    history_path = DOCS_DIR / RELEASE_HISTORY_TARGET
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(_build_release_history_markdown(entries), encoding="utf-8")
+
+    for entry in entries:
+        module_log_path = DOCS_DIR / entry.log_target
+        module_log_path.parent.mkdir(parents=True, exist_ok=True)
+        module_log_path.write_text(_build_module_release_log_markdown(entry), encoding="utf-8")
 
 
 def _inject_release_summary_into_home(entries: list[ReleaseEntry]) -> None:
@@ -421,7 +780,7 @@ def stage_docs() -> list[tuple[Path, str]]:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, target_path)
 
-    _write_release_center_page(release_entries)
+    _write_release_pages(release_entries)
     _inject_release_summary_into_home(release_entries)
 
     return markdown_routes
@@ -511,7 +870,7 @@ def _print_release_entries(entries: list[ReleaseEntry]) -> None:
         print(
             f"{entry.manifest_path.relative_to(ROOT_DIR).as_posix()} -> "
             f"{entry.module_name} "
-            f"(v{entry.version}, {entry.channel}, {route})"
+            f"(v{entry.version}, {entry.channel}, {route}, history={len(entry.history)})"
         )
 
 
@@ -523,6 +882,11 @@ def build_cli() -> None:
         "Aggregated "
         f"{len(release_entries)} release manifests into "
         f"{(DOCS_DIR / RELEASE_CENTER_TARGET).relative_to(ROOT_DIR).as_posix()}"
+    )
+    print(
+        "Generated "
+        f"{_history_count(release_entries)} history entries into "
+        f"{(DOCS_DIR / RELEASE_HISTORY_TARGET).relative_to(ROOT_DIR).as_posix()}"
     )
     _print_routes(routes)
 
@@ -544,6 +908,7 @@ def scan_releases_cli() -> None:
         )
     else:
         print("Release channel stats: none")
+    print(f"Release history entries: {_history_count(entries)}")
     _print_release_entries(entries)
 
 

@@ -66,6 +66,8 @@ dist/html
 
 - 扫描所有子模块的 `release.toml`
 - 生成 `release-center/index.html`
+- 生成 `release-center/history/index.html`
+- 生成 `release-center/modules/<module>.html`
 - 把汇总统计注入首页的“版本发布总览”模块
 
 也可以单独执行：
@@ -97,7 +99,27 @@ interfaces = ["CLI", "Markdown Docs"]
 platforms = ["Windows"]
 dependencies = []
 notes = "由 auto_docs 统一扫描和汇总。"
+
+[[history]]
+version = "1.3.0"
+channel = "stable"
+released_at = "2026-04-23"
+title = "接入版本中心与发布日志"
+summary = "新增汇总页、时间线和模块日志页。"
+changes = [
+  "自动生成 release-center/index.html",
+  "自动生成 release-center/history/index.html",
+  "自动生成模块级发布日志页",
+]
+breaking_changes = []
+architecture_notes = "版本信息改为从 release.toml 渲染。"
 ```
+
+说明：
+
+- `[version]` 表示当前版本快照
+- `[[history]]` 表示历史发布记录，按版本维度输出日志
+- 即使不写 `[[history]]`，系统也会用 `[version]` 自动兜底生成一条当前版本记录
 
 ## 你最关心的两个问题
 

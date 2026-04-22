@@ -18,3 +18,27 @@ interfaces = ["Static Docs", "Batch Report"]
 platforms = ["Windows"]
 dependencies = ["scripts"]
 notes = "作为 scripts 下的子模块，重点沉淀统计口径、导出流程和版本记录。"
+
+[[history]]
+version = "0.4.2"
+channel = "beta"
+released_at = "2026-04-22"
+title = "补齐报表模块版本元数据"
+summary = "将报表模块纳入版本中心，开始记录架构与发布说明。"
+changes = [
+  "新增 report 子模块 release.toml",
+  "接入首页统计和汇总表",
+]
+breaking_changes = []
+
+[[history]]
+version = "0.4.0"
+channel = "beta"
+released_at = "2026-04-16"
+title = "报表目录重构"
+summary = "拆分报表说明目录，为后续导出脚本留出结构空间。"
+changes = [
+  "沉淀 report/README.md 作为子目录首页",
+  "明确静态报表和批处理报表的边界",
+]
+breaking_changes = []

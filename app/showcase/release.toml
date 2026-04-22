@@ -18,3 +18,27 @@ interfaces = ["Static HTML", "Theme Preview"]
 platforms = ["Windows", "Offline HTML"]
 dependencies = ["scripts", "report"]
 notes = "主要承担样式验证和插件能力回归，不参与业务执行链路。"
+
+[[history]]
+version = "0.1.0"
+channel = "draft"
+released_at = "2026-04-23"
+title = "接入主题能力演示"
+summary = "增加 iconify、hover card、echarts、codexec 与 excalidraw 示例。"
+changes = [
+  "建立 showcase 目录",
+  "补充跨页引用和图表示例",
+]
+breaking_changes = []
+
+[[history]]
+version = "0.0.1"
+channel = "draft"
+released_at = "2026-04-21"
+title = "演示页初始化"
+summary = "用于验证 shadcn-lwq 样式与本地静态链接。"
+changes = [
+  "创建主题演示目录",
+  "验证 README 和普通 Markdown 路由",
+]
+breaking_changes = []

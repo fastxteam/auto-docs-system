@@ -18,3 +18,42 @@ interfaces = ["CLI", "Markdown Docs"]
 platforms = ["Windows"]
 dependencies = []
 notes = "脚本和说明文档同目录维护，由 auto_docs 负责扫描和汇总。"
+
+[[history]]
+version = "1.3.0"
+channel = "stable"
+released_at = "2026-04-23"
+title = "接入版本中心与发布日志"
+summary = "新增 release 汇总、主页统计和模块发布日志输出。"
+changes = [
+  "build-docs 自动扫描各子模块 release.toml",
+  "生成 release-center 汇总页和发布日志页",
+  "首页自动注入版本发布总览模块",
+]
+breaking_changes = []
+architecture_notes = "版本信息不再散落在文档正文，而是统一从 release.toml 生成。"
+
+[[history]]
+version = "1.2.0"
+channel = "stable"
+released_at = "2026-04-18"
+title = "统一 Markdown 构建流程"
+summary = "完成 app 目录扫描、README 路由约定和静态 HTML 构建。"
+changes = [
+  "README.md 自动映射目录首页",
+  "非 README Markdown 自动映射独立内容页",
+]
+breaking_changes = []
+architecture_notes = "开始采用 app 与 auto_docs 分层。"
+
+[[history]]
+version = "1.1.0"
+channel = "beta"
+released_at = "2026-04-12"
+title = "文档脚手架初版"
+summary = "引入 MkDocs 作为脚本文档静态站基础设施。"
+changes = [
+  "建立 mkdocs.yml 和 uv 依赖管理",
+  "初步跑通文档输出目录",
+]
+breaking_changes = []
