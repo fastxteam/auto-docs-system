@@ -10,12 +10,19 @@ theme:
   show_title: true
   topbar_sections: true
   show_datetime: false
+  katex_options:
+    trust: true
   pygments_style:
     light: shadcn-light
     dark: github-dark
 
 plugins:
-  - search
+  - shadcn-lwq/search
+  - shadcn-lwq/autonumber:
+      prefixes:
+        th: Rule
+  - shadcn-lwq/excalidraw:
+      directory: auto_docs/excalidraw
 
 markdown_extensions:
   - admonition
@@ -32,9 +39,21 @@ markdown_extensions:
   - toc:
       permalink: true
   - pymdownx.details
+  - pymdownx.blocks.details
+  - pymdownx.blocks.caption
   - pymdownx.snippets
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.blocks.tab:
+      combine_header_slug: true
+      separator: ___
+  - pymdownx.progressbar
+  - pymdownx.arithmatex:
+      generic: true
+  - shadcn.extensions.echarts.alpha
+  - shadcn.extensions.codexec
+  - shadcn.extensions.iconify
+  - shadcn.extensions.hover_card
 
 validation:
   links:

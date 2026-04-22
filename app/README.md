@@ -16,6 +16,11 @@
 3. 功能说明用单独的 `*.md`
 4. 执行 `uv run build-docs`
 
+## 能力示例
+
+- `mkdocs-shadcn-lwq` 扩展与插件示例：见 [showcase/index.md](showcase/index.md)
+- 交叉引用、ECharts、代码执行示例：见 [showcase/references.md](showcase/references.md)
+
 
 
 

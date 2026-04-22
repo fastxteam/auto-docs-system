@@ -148,6 +148,46 @@ def _patch_mkdocs_shadcn_windows_paths() -> None:
     MarkdownMixin.on_page_context = on_page_context
 
 
+def _patch_mkdocs_shadcn_autonumber_local_links() -> None:
+    from shadcn.plugins.autonumber import AutoNumberPlugin
+
+    def on_page_content(self, html, page, config, files):
+        for match in self.reference_pattern.finditer(html):
+            full_match: str = match.group(0)
+            prefix: str = match.group(1)
+            is_capitalized: bool = prefix[0].isupper()
+            prefix = prefix.lower()
+
+            id_: str = match.group(2)
+            if id_ not in self.registry:
+                continue
+
+            entry = self.registry[id_]
+            if entry.prefix != prefix:
+                continue
+
+            label = (
+                self.config.prefixes[prefix].capitalize()
+                if is_capitalized
+                else self.config.prefixes[prefix].lower()
+            )
+
+            if entry.page.file.src_uri == page.file.src_uri:
+                href = f"#{entry.anchor}"
+            else:
+                href = f"{entry.page.file.url_relative_to(page.file)}#{entry.anchor}"
+
+            replacement = (
+                f'<a href="{href}" class="autonumber {prefix}">'
+                f"{label} {entry.number}</a>"
+            )
+            html = html.replace(full_match, replacement)
+
+        return html
+
+    AutoNumberPlugin.on_page_content = on_page_content
+
+
 def build_site() -> list[tuple[Path, str]]:
     from mkdocs.commands.build import build
     from mkdocs.config import load_config
@@ -155,6 +195,7 @@ def build_site() -> list[tuple[Path, str]]:
     routes = stage_docs()
     SITE_DIR.mkdir(parents=True, exist_ok=True)
     _patch_mkdocs_shadcn_windows_paths()
+    _patch_mkdocs_shadcn_autonumber_local_links()
     config = load_config(config_file_path=str(MKDOCS_CONFIG))
     overrides_dir = str(THEME_OVERRIDES_DIR.resolve())
     config.theme.dirs[:] = [overrides_dir, *[d for d in config.theme.dirs if Path(d).resolve() != Path(overrides_dir)]]
