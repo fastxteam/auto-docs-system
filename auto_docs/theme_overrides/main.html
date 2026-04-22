@@ -65,7 +65,7 @@
             <div class="container-wrapper flex flex-1 flex-col px-2">
                 <div data-slot="sidebar-wrapper"
                     style="--sidebar-width:calc(var(--spacing) * 72);--sidebar-width-icon:3rem;"
-                    class="group/sidebar-wrapper has-data-[variant=inset]:bg-sidebar flex w-full 3xl:fixed:container 3xl:fixed:px-3 min-h-min flex-1 items-start px-0 [--sidebar-width:220px] [--top-spacing:0] lg:grid lg:grid-cols-[var(--sidebar-width)_minmax(0,1fr)] lg:[--sidebar-width:240px] lg:[--top-spacing:calc(var(--spacing)*4)]">
+                    class="docs-layout group/sidebar-wrapper has-data-[variant=inset]:bg-sidebar flex w-full 3xl:fixed:container 3xl:fixed:px-3 min-h-min flex-1 items-start px-0 [--sidebar-width:220px] [--top-spacing:0] lg:grid lg:grid-cols-[var(--sidebar-width)_minmax(0,1fr)] lg:[--sidebar-width:240px] lg:[--top-spacing:calc(var(--spacing)*4)]">
                     <div data-slot="sidebar"
                         class="w-(--sidebar-width) flex-col text-sidebar-foreground sticky top-[calc(var(--header-height)+0.6rem)] z-30 hidden h-[calc(100svh-10rem)] overscroll-none bg-transparent [--sidebar-menu-width:--spacing(56)] lg:flex">
                         <div class="h-9"></div>
@@ -80,16 +80,16 @@
                             {% include "templates/sidebar.html" %}
                         </div>
                     </div>
-                    <div class="h-full w-full">
-                        <div data-slot="docs" class="flex items-stretch text-[1.05rem] sm:text-[15px] xl:w-full">
-                            <div class="flex min-w-0 flex-1 flex-col">
+                    <div class="docs-main-pane h-full w-full">
+                        <div data-slot="docs" class="docs-page-frame flex items-stretch text-[1.05rem] sm:text-[15px] xl:w-full">
+                            <div class="docs-page-column flex min-w-0 flex-1 flex-col">
                                 <div class="h-(--top-spacing) shrink-0"></div>
                                 {% include "templates/page.html" %}
                                 {% include "templates/bottom_navigation.html" %}
                                 {% include "templates/bottom_sidebar.html" %}
                             </div>
                             <div
-                                class="sticky top-[calc(var(--header-height)+1px)] ml-auto hidden h-[calc(100svh-var(--header-height)-var(--footer-height))] w-72 flex-col gap-4 overflow-hidden overscroll-none pb-8 xl:flex">
+                                class="docs-toc sticky top-[calc(var(--header-height)+1px)] ml-auto hidden h-[calc(100svh-var(--header-height)-var(--footer-height))] w-72 flex-col gap-4 overflow-hidden overscroll-none pb-8 xl:flex">
                                 <div class="h-(--top-spacing) shrink-0"></div>
                                 {% include "templates/toc.html" %}
                             </div>

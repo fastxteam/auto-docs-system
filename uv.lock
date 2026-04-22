@@ -204,6 +204,21 @@ wheels = [
 ]
 
 [[package]]
+name = "mkdocs-shadcn-lwq"
+version = "0.10.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "bottle" },
+    { name = "gitpython" },
+    { name = "mkdocs" },
+    { name = "pymdown-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ad/65/37ce2a7e3227f7247c5d8e18ccbe0d68921b0c9250bcc60b9fdcad6bc8c5/mkdocs_shadcn_lwq-0.10.5.tar.gz", hash = "sha256:ea811fdb28c3269fb135e96f21f50c05804fb3757055b018a8f622a60407a89d", size = 3064012, upload-time = "2026-04-22T14:53:59.71Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/39/fb/3a27d11b9d5a827d48876ccd1dc0bbb6afcf321b8e8300a715798cb36494/mkdocs_shadcn_lwq-0.10.5-py3-none-any.whl", hash = "sha256:e4d4c5754771f9b4b894f1aad573f0e29200aeb06ffaff5633931a309d0a7444", size = 1415915, upload-time = "2026-04-22T14:54:00.991Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.1"
 source = { registry = "https://pypi.org/simple" }
@@ -262,6 +277,7 @@ source = { editable = "." }
 dependencies = [
     { name = "mkdocs" },
     { name = "mkdocs-shadcn" },
+    { name = "mkdocs-shadcn-lwq" },
     { name = "pymdown-extensions" },
 ]
 
@@ -269,6 +285,7 @@ dependencies = [
 requires-dist = [
     { name = "mkdocs", specifier = ">=1.6.1,<2.0" },
     { name = "mkdocs-shadcn", specifier = ">=0.10.4,<0.11" },
+    { name = "mkdocs-shadcn-lwq", specifier = ">=0.10.5" },
     { name = "pymdown-extensions", specifier = ">=10.0,<11.0" },
 ]
 
