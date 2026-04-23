@@ -18,6 +18,7 @@
 - 只有 `README.md` 会作为目录首页
 - 其他非 `README.md` 的 Markdown 都会作为普通内容页
 - 普通内容页路由按“目录 + 文件名”生成
+- 如果某个目录下没有 `README.md` 或 `index.md`，`build-docs` 会自动生成一个目录级 `index.md`
 - 如果两个文件会生成同一路由，构建时直接报错
 - 针对 `mkdocs-shadcn` 在 Windows 下的路径警告做了运行时修补
 - 构建结果使用文件式链接，便于拷到其他电脑直接打开
@@ -43,6 +44,7 @@ app/
 - `app/scripts/README.md` -> `/scripts/index.html`
 - `app/scripts/cleanup.md` -> `/scripts/cleanup.html`
 - `app/scripts/report/README.md` -> `/scripts/report/index.html`
+- `app/tools/install.md` 且目录下无 `README.md` 时，会额外自动生成 `/tools/index.html`
 
 ## 使用方式
 
@@ -211,6 +213,8 @@ breaking_changes = [
 
 - `README.md` -> 当前目录首页页面
 - 其他 `*.md` -> 当前目录下的独立页面
+- 如果目录下没有 `README.md` / `index.md`，系统会自动补一个目录首页
 - 例如 `app/tools/README.md` -> `/tools/index.html`
 - 例如 `app/tools/install.md` -> `/tools/install.html`
+- 例如只有 `app/tools/install.md` 时，仍会自动生成 `/tools/index.html`
 - 例如 `app/index.md` -> `/index/index.html`

@@ -38,6 +38,13 @@ IGNORED_SUFFIXES = {".py", ".pyc", ".pyo"}
 
 
 @dataclass(slots=True)
+class GeneratedDocPage:
+    target_relative: Path
+    route: str
+    markdown: str
+
+
+@dataclass(slots=True)
 class ReleaseEntry:
     manifest_path: Path
     module_relative_dir: Path
@@ -144,7 +151,156 @@ def _raise_route_collision(existing_source: Path, source_path: Path, route: str)
     )
 
 
-def _prepare_source_manifest() -> tuple[list[Path], list[tuple[Path, str]]]:
+def _humanize_name(name: str) -> str:
+    text = re.sub(r"[_-]+", " ", name).strip()
+    if not text:
+        return "Untitled"
+    return text[:1].upper() + text[1:]
+
+
+def _directory_title(relative_dir: Path) -> str:
+    if relative_dir == Path("."):
+        return "文档首页"
+    return _humanize_name(relative_dir.name)
+
+
+def _extract_markdown_title(source_path: Path) -> str | None:
+    try:
+        content = source_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    for line in content.splitlines():
+        text = line.strip()
+        if not text.startswith("#"):
+            continue
+        heading = text.lstrip("#").strip()
+        if heading:
+            return heading
+    return None
+
+
+def _directory_index_target(relative_dir: Path) -> Path:
+    if relative_dir == Path("."):
+        return Path("index.md")
+    return relative_dir / "index.md"
+
+
+def _build_generated_directory_indexes(
+    source_files: list[Path],
+) -> list[GeneratedDocPage]:
+    markdown_sources = [path for path in source_files if path.suffix.lower() == ".md"]
+    if not markdown_sources:
+        return []
+
+    actual_markdown_targets = {
+        _target_relative_path(source_path): source_path for source_path in markdown_sources
+    }
+    existing_index_dirs = {
+        target.parent
+        for target in actual_markdown_targets
+        if target.name.lower() == "index.md"
+    }
+
+    directories_with_docs: set[Path] = set()
+    for target in actual_markdown_targets:
+        current = target.parent
+        while True:
+            directories_with_docs.add(current)
+            if current == Path("."):
+                break
+            current = current.parent
+
+    directories_needing_index = sorted(
+        directories_with_docs - existing_index_dirs,
+        key=lambda item: (len(item.parts), item.as_posix()),
+    )
+    if not directories_needing_index:
+        return []
+
+    all_index_targets: dict[Path, Path] = {
+        directory: _directory_index_target(directory)
+        for directory in existing_index_dirs | set(directories_needing_index)
+    }
+
+    title_lookup: dict[Path, str] = {}
+    for target, source_path in actual_markdown_targets.items():
+        title_lookup[target] = _extract_markdown_title(source_path) or _humanize_name(
+            target.stem
+        )
+
+    generated_pages: list[GeneratedDocPage] = []
+    for relative_dir in directories_needing_index:
+        current_target = _directory_index_target(relative_dir)
+        child_pages = sorted(
+            target
+            for target in actual_markdown_targets
+            if target.parent == relative_dir and target.name.lower() != "index.md"
+        )
+        child_dirs = sorted(
+            directory
+            for directory in directories_with_docs
+            if directory.parent == relative_dir
+        )
+
+        lines = [
+            f"# {_directory_title(relative_dir)}",
+            "",
+            "> 该页面由 `build-docs` 自动生成，因为当前目录下缺少 `README.md` 或 `index.md`。",
+            "",
+        ]
+
+        if relative_dir == Path("."):
+            lines.extend(
+                [
+                    "当前目录概览:",
+                    "",
+                ]
+            )
+            lines.append(HOME_RELEASE_PLACEHOLDER)
+            lines.append("")
+
+        if child_dirs:
+            lines.extend(["## 子目录", ""])
+            for child_dir in child_dirs:
+                child_target = all_index_targets[child_dir]
+                lines.append(
+                    "- "
+                    f"[{_directory_title(child_dir)}]"
+                    f"({_relative_doc_link(current_target, child_target)})"
+                )
+            lines.append("")
+
+        if child_pages:
+            lines.extend(["## 子页面", ""])
+            for child_page in child_pages:
+                lines.append(
+                    "- "
+                    f"[{title_lookup.get(child_page, _humanize_name(child_page.stem))}]"
+                    f"({_relative_doc_link(current_target, child_page)})"
+                )
+            lines.append("")
+
+        if not child_dirs and not child_pages:
+            lines.extend(
+                [
+                    "当前目录暂时没有可展示的子目录或子页面。",
+                    "",
+                ]
+            )
+
+        generated_pages.append(
+            GeneratedDocPage(
+                target_relative=current_target,
+                route=_route_from_target(current_target),
+                markdown="\n".join(lines).rstrip() + "\n",
+            )
+        )
+
+    return generated_pages
+
+
+def _prepare_source_manifest() -> tuple[list[Path], list[GeneratedDocPage], list[tuple[Path, str]]]:
     occupied_targets: dict[Path, Path] = {}
     occupied_routes: dict[str, Path] = {}
     for source_path in _iter_source_files():
@@ -162,6 +318,7 @@ def _prepare_source_manifest() -> tuple[list[Path], list[tuple[Path, str]]]:
             occupied_routes[route] = source_path
 
     source_files = sorted(occupied_targets.values())
+    generated_pages = _build_generated_directory_indexes(source_files)
     markdown_routes: list[tuple[Path, str]] = []
     for source_path in source_files:
         if source_path.suffix.lower() != ".md":
@@ -169,10 +326,15 @@ def _prepare_source_manifest() -> tuple[list[Path], list[tuple[Path, str]]]:
         target_relative = _target_relative_path(source_path)
         markdown_routes.append((source_path.relative_to(ROOT_DIR), _route_from_target(target_relative)))
 
+    for generated_page in generated_pages:
+        markdown_routes.append(
+            (Path("[generated]") / generated_page.target_relative, generated_page.route)
+        )
+
     if not markdown_routes:
         raise SystemExit(f"No Markdown files found under {APP_DIR}")
 
-    return source_files, markdown_routes
+    return source_files, generated_pages, markdown_routes
 
 
 def _as_string(value: object, default: str = "") -> str:
@@ -950,7 +1112,7 @@ def _inject_release_summary_into_home(entries: list[ReleaseEntry]) -> None:
 
 
 def stage_docs() -> list[tuple[Path, str]]:
-    source_files, markdown_routes = _prepare_source_manifest()
+    source_files, generated_pages, markdown_routes = _prepare_source_manifest()
     release_entries = _collect_release_entries()
 
     if BUILD_ROOT.exists():
@@ -962,6 +1124,11 @@ def stage_docs() -> list[tuple[Path, str]]:
         target_path = DOCS_DIR / target_relative
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, target_path)
+
+    for generated_page in generated_pages:
+        target_path = DOCS_DIR / generated_page.target_relative
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(generated_page.markdown, encoding="utf-8")
 
     _write_release_pages(release_entries)
     _inject_release_summary_into_home(release_entries)
@@ -1075,7 +1242,7 @@ def build_cli() -> None:
 
 
 def scan_cli() -> None:
-    _, routes = _prepare_source_manifest()
+    _, _, routes = _prepare_source_manifest()
     print(f"Discovered {len(routes)} markdown pages under {APP_DIR}")
     _print_routes(routes)
 
