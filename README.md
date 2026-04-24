@@ -78,7 +78,7 @@ dist/html
 uv run scan-releases
 ```
 
-示例 1，单架构工具（兼容旧格式）：
+示例 1，单架构工具：
 
 ```toml
 [module]
@@ -101,6 +101,7 @@ interfaces = ["CLI", "Markdown Docs"]
 platforms = ["Windows"]
 dependencies = []
 notes = "由 auto_docs 统一扫描和汇总。"
+doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md", design_spec = "", test_report = "" }
 
 [[history]]
 version = "1.3.0"
@@ -121,6 +122,7 @@ architecture_notes = "版本信息改为从 release.toml 渲染。"
 
 - `[version]` 表示当前版本快照
 - `[architecture]` 表示当前唯一架构线
+- `doc_checklist` 表示该架构线下的固定文档点检清单
 - `[[history]]` 表示历史发布记录，按版本维度输出日志
 - 即使不写 `[[history]]`，系统也会用 `[version]` 自动兜底生成一条当前版本记录
 
@@ -148,6 +150,7 @@ channel = "stable"
 released_at = "2026-04-23"
 notes = "ARC_V1 进入维护期，保持现有批处理能力。"
 architecture_notes = "面向现网任务，优先保证兼容性。"
+doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md", design_spec = "", test_report = "" }
 
 [[architectures.history]]
 version = "1.3.0"
@@ -176,6 +179,7 @@ channel = "beta"
 released_at = "2026-04-23"
 notes = "ARC_V2 开始分层治理任务入口和统计输出。"
 architecture_notes = "逐步替换旧批处理拼装方式。"
+doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md", design_spec = "", test_report = "" }
 
 [[architectures.history]]
 version = "2.0.0-beta.1"
@@ -195,11 +199,29 @@ breaking_changes = [
 多架构模式说明：
 
 - `[[architectures]]` 表示同一个工具下的一条架构线
+- `doc_checklist` 表示该架构线下的固定文档点检清单
 - `[[architectures.history]]` 表示该架构线自己的版本历史
 - 生成结果仍然是“一个工具一个发布日志页”，但页内会按 `ARC_V1`、`ARC_V2` 分节展示
 - `release-center/index.md` 会汇总所有工具和架构线
 - `release-center/history/index.md` 会把所有架构线的历史记录合并成全局时间线
 - 同一个 `release.toml` 内，不要混用旧格式 `[version]/[architecture]/[[history]]` 和新格式 `[[architectures]]`
+
+简化后的文档点检约定：
+
+- `doc_checklist` 固定只管理 5 项：`software_copyright`、`patent`、`user_manual`、`design_spec`、`test_report`
+- 值直接写 Markdown 路径即可，例如 `user_manual = "README.md"`
+- 留空字符串 `""` 表示该项还没补齐
+- 如果确实需要更细状态，也可以写成 `user_manual = { path = "README.md", status = "in_progress" }`
+- 页面里会统一渲染为：软著、专利、用户手册、设计方案、测试报告
+- 每个版本迭代的变更记录，不建议继续塞进 `release.toml`，而是直接写进 `user_manual` 对应的文档中
+
+关于积分管理的建议：
+
+- 不建议继续把积分明细写在 `release.toml` 里
+- `release.toml` 更适合做“版本快照 + 文档点检”，不适合做人/分值/审批流管理
+- 如果后面一定要做积分，建议单独维护一份“贡献台账”，按人和周期管理，而不是按版本管理
+- 推荐位置可以是 `auto_docs/contribution_registry/2026Q2.toml` 这类独立文件，后续再由脚本汇总
+- 旧格式 `documents` / `score_items` 仍兼容读取，但不再推荐继续新增
 
 ## 你最关心的两个问题
 

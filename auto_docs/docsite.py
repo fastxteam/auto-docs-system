@@ -35,6 +35,34 @@ IGNORED_PARTS = {
     "dist",
 }
 IGNORED_SUFFIXES = {".py", ".pyc", ".pyo"}
+DOC_CHECKLIST_ITEMS = (
+    ("software_copyright", "软著"),
+    ("patent", "专利"),
+    ("user_manual", "用户手册"),
+    ("design_spec", "设计方案"),
+    ("test_report", "测试报告"),
+)
+DOC_CHECKLIST_LABELS = dict(DOC_CHECKLIST_ITEMS)
+DOC_CHECKLIST_ALIASES = {
+    "soft_copyright": "software_copyright",
+    "software_copyright": "software_copyright",
+    "copyright": "software_copyright",
+    "软著": "software_copyright",
+    "patent": "patent",
+    "专利": "patent",
+    "user_manual": "user_manual",
+    "manual": "user_manual",
+    "readme": "user_manual",
+    "用户手册": "user_manual",
+    "design": "design_spec",
+    "design_spec": "design_spec",
+    "design_doc": "design_spec",
+    "design_solution": "design_spec",
+    "设计方案": "design_spec",
+    "test": "test_report",
+    "test_report": "test_report",
+    "测试报告": "test_report",
+}
 
 
 @dataclass(slots=True)
@@ -42,6 +70,25 @@ class GeneratedDocPage:
     target_relative: Path
     route: str
     markdown: str
+
+
+@dataclass(slots=True)
+class ReleaseDocumentItem:
+    key: str
+    label: str
+    status: str
+    path: str
+
+
+@dataclass(slots=True)
+class ReleaseScoreItem:
+    dimension: str
+    action: str
+    points: int
+    status: str
+    owner: str
+    evidence: str
+    note: str
 
 
 @dataclass(slots=True)
@@ -69,6 +116,8 @@ class ReleaseEntry:
     slug: str
     log_target: Path
     log_route: str
+    documents: list[ReleaseDocumentItem]
+    score_items: list[ReleaseScoreItem]
     history: list["ReleaseHistoryItem"]
 
 
@@ -83,6 +132,21 @@ class ReleaseHistoryItem:
     breaking_changes: list[str]
     architecture_notes: str
     is_current: bool
+
+
+@dataclass(slots=True)
+class ReleaseDocumentStats:
+    total: int
+    completed: int
+
+
+@dataclass(slots=True)
+class ReleaseScoreStats:
+    total_items: int
+    confirmed_items: int
+    pending_items: int
+    confirmed_points: int
+    pending_points: int
 
 
 def _is_hidden_or_ignored(relative_path: Path) -> bool:
@@ -359,6 +423,33 @@ def _as_string_list(value: object) -> list[str]:
     raise SystemExit(f"Unsupported list value in {RELEASE_MANIFEST_NAME}: {value!r}")
 
 
+def _as_int(value: object, default: int = 0) -> int:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        raise SystemExit(f"Unsupported integer value in {RELEASE_MANIFEST_NAME}: {value!r}")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(
+            f"Unsupported integer value in {RELEASE_MANIFEST_NAME}: {value!r}"
+        ) from exc
+
+
+def _as_bool(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "yes", "1", "required"}:
+            return True
+        if text in {"false", "no", "0", "optional"}:
+            return False
+    raise SystemExit(f"Unsupported boolean value in {RELEASE_MANIFEST_NAME}: {value!r}")
+
+
 def _as_table_list(value: object) -> list[dict[str, object]]:
     if value is None:
         return []
@@ -367,6 +458,151 @@ def _as_table_list(value: object) -> list[dict[str, object]]:
     raise SystemExit(
         f"Unsupported history value in {RELEASE_MANIFEST_NAME}: expected array of tables, got {value!r}"
     )
+
+
+def _status_key(value: str) -> str:
+    return re.sub(r"[\s-]+", "_", value.strip().lower())
+
+
+def _normalize_doc_check_key(key: str) -> str | None:
+    return DOC_CHECKLIST_ALIASES.get(_status_key(key))
+
+
+def _doc_checklist_label(key: str) -> str:
+    return DOC_CHECKLIST_LABELS.get(key, key)
+
+
+def _default_doc_checklist_items() -> list[ReleaseDocumentItem]:
+    return [
+        ReleaseDocumentItem(
+            key=key,
+            label=label,
+            status="pending",
+            path="",
+        )
+        for key, label in DOC_CHECKLIST_ITEMS
+    ]
+
+
+def _parse_doc_checklist_value(value: object) -> tuple[str, str]:
+    if value is None:
+        return "", "pending"
+
+    if isinstance(value, bool):
+        return ("", "completed") if value else ("", "pending")
+
+    if isinstance(value, str):
+        path = value.strip()
+        return path, ("completed" if path else "pending")
+
+    if isinstance(value, dict):
+        path = _as_string(value.get("path"))
+        status = _as_string(value.get("status"), "completed" if path else "pending")
+        return path, status
+
+    raise SystemExit(
+        f"Unsupported doc_checklist value in {RELEASE_MANIFEST_NAME}: {value!r}"
+    )
+
+
+def _parse_release_doc_checklist(
+    raw_doc_checklist: object,
+    *,
+    manifest_path: Path,
+    architecture_name: str,
+) -> list[ReleaseDocumentItem]:
+    if raw_doc_checklist is None:
+        return []
+    if not isinstance(raw_doc_checklist, dict):
+        raise SystemExit(
+            f"Unsupported doc_checklist value in {RELEASE_MANIFEST_NAME}: {raw_doc_checklist!r}"
+        )
+
+    architecture_label = architecture_name or "default"
+    items = {item.key: item for item in _default_doc_checklist_items()}
+
+    for raw_key, raw_value in raw_doc_checklist.items():
+        key = _normalize_doc_check_key(str(raw_key))
+        if key is None:
+            raise SystemExit(
+                "Unsupported doc_checklist item "
+                f"`{raw_key}` in {manifest_path.relative_to(ROOT_DIR).as_posix()} / {architecture_label}"
+            )
+
+        path, status = _parse_doc_checklist_value(raw_value)
+        items[key] = ReleaseDocumentItem(
+            key=key,
+            label=_doc_checklist_label(key),
+            status=status,
+            path=path,
+        )
+
+    return [items[key] for key, _ in DOC_CHECKLIST_ITEMS]
+
+
+def _parse_release_documents(
+    raw_documents: list[dict[str, object]],
+    *,
+    manifest_path: Path,
+    architecture_name: str,
+) -> list[ReleaseDocumentItem]:
+    items: list[ReleaseDocumentItem] = []
+    architecture_label = architecture_name or "default"
+
+    for index, raw_item in enumerate(raw_documents, start=1):
+        label = _as_string(raw_item.get("label"), _as_string(raw_item.get("title")))
+        key = _normalize_doc_check_key(
+            _as_string(raw_item.get("key"), _as_string(raw_item.get("category"), label))
+        )
+        path = _as_string(raw_item.get("path"))
+        if not label and not path:
+            raise SystemExit(
+                "Missing documents.title/path in "
+                f"{manifest_path.relative_to(ROOT_DIR).as_posix()} / {architecture_label} / item {index}"
+            )
+
+        items.append(
+            ReleaseDocumentItem(
+                key=key or f"custom_{index}",
+                label=label or (_doc_checklist_label(key) if key else path),
+                status=_as_string(raw_item.get("status"), "completed" if path else "pending"),
+                path=path,
+            )
+        )
+
+    return items
+
+
+def _parse_release_score_items(
+    raw_score_items: list[dict[str, object]],
+    *,
+    manifest_path: Path,
+    architecture_name: str,
+) -> list[ReleaseScoreItem]:
+    items: list[ReleaseScoreItem] = []
+    architecture_label = architecture_name or "default"
+
+    for index, raw_item in enumerate(raw_score_items, start=1):
+        action = _as_string(raw_item.get("action"), _as_string(raw_item.get("title")))
+        if not action:
+            raise SystemExit(
+                "Missing score_items.action in "
+                f"{manifest_path.relative_to(ROOT_DIR).as_posix()} / {architecture_label} / item {index}"
+            )
+
+        items.append(
+            ReleaseScoreItem(
+                dimension=_as_string(raw_item.get("dimension"), "未分类"),
+                action=action,
+                points=_as_int(raw_item.get("points")),
+                status=_as_string(raw_item.get("status"), "pending"),
+                owner=_as_string(raw_item.get("owner")),
+                evidence=_as_string(raw_item.get("evidence")),
+                note=_as_string(raw_item.get("note")),
+            )
+        )
+
+    return items
 
 
 def _slugify(text: str) -> str:
@@ -448,6 +684,165 @@ def _format_code_list(items: list[str]) -> str:
     if not items:
         return "-"
     return ", ".join(f"`{item}`" for item in items)
+
+
+def _table_text(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return "-"
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _resolve_release_doc_target(manifest_path: Path, doc_path: str) -> Path | None:
+    text = doc_path.strip()
+    if not text:
+        return None
+
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        candidate = manifest_path.parent / candidate
+    candidate = candidate.resolve(strict=False)
+
+    try:
+        relative_to_app = candidate.relative_to(APP_DIR.resolve())
+    except ValueError:
+        return None
+
+    if not candidate.exists() or not candidate.is_file() or candidate.suffix.lower() != ".md":
+        return None
+
+    return _target_relative_path(APP_DIR / relative_to_app)
+
+
+def _format_release_doc_path(
+    entry: ReleaseEntry,
+    item: ReleaseDocumentItem,
+    from_target: Path,
+) -> str:
+    if not item.path:
+        return "-"
+
+    doc_target = _resolve_release_doc_target(entry.manifest_path, item.path)
+    if doc_target is None:
+        return _table_text(item.path)
+
+    return f"[{_table_text(item.path)}]({_relative_doc_link(from_target, doc_target)})"
+
+
+def _format_release_evidence(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return "-"
+    if text.startswith(("http://", "https://")):
+        return f"[链接]({text})"
+    return _table_text(text)
+
+
+def _is_document_completed(status: str) -> bool:
+    return _status_key(status) in {
+        "done",
+        "completed",
+        "complete",
+        "ready",
+        "pass",
+        "passed",
+        "ok",
+        "approved",
+    }
+
+
+def _format_document_status(status: str) -> str:
+    key = _status_key(status)
+    if _is_document_completed(status):
+        return "已完成"
+    if key in {"in_progress", "draft", "working"}:
+        return "编写中"
+    if key in {"na", "n_a", "skip", "not_applicable"}:
+        return "不适用"
+    return "待补充"
+
+
+def _is_score_confirmed(status: str) -> bool:
+    return _status_key(status) in {
+        "confirmed",
+        "done",
+        "completed",
+        "approved",
+        "accepted",
+        "merged",
+        "released",
+    }
+
+
+def _document_stats(documents: list[ReleaseDocumentItem]) -> ReleaseDocumentStats:
+    total = len(documents)
+    completed = sum(1 for item in documents if _is_document_completed(item.status))
+    return ReleaseDocumentStats(
+        total=total,
+        completed=completed,
+    )
+
+
+def _score_stats(score_items: list[ReleaseScoreItem]) -> ReleaseScoreStats:
+    confirmed_items = [item for item in score_items if _is_score_confirmed(item.status)]
+    pending_items = [item for item in score_items if not _is_score_confirmed(item.status)]
+    return ReleaseScoreStats(
+        total_items=len(score_items),
+        confirmed_items=len(confirmed_items),
+        pending_items=len(pending_items),
+        confirmed_points=sum(item.points for item in confirmed_items),
+        pending_points=sum(item.points for item in pending_items),
+    )
+
+
+def _aggregate_document_stats(entries: list[ReleaseEntry]) -> ReleaseDocumentStats:
+    totals = [
+        _document_stats(entry.documents)
+        for entry in entries
+    ]
+    return ReleaseDocumentStats(
+        total=sum(item.total for item in totals),
+        completed=sum(item.completed for item in totals),
+    )
+
+
+def _aggregate_score_stats(entries: list[ReleaseEntry]) -> ReleaseScoreStats:
+    totals = [
+        _score_stats(entry.score_items)
+        for entry in entries
+    ]
+    return ReleaseScoreStats(
+        total_items=sum(item.total_items for item in totals),
+        confirmed_items=sum(item.confirmed_items for item in totals),
+        pending_items=sum(item.pending_items for item in totals),
+        confirmed_points=sum(item.confirmed_points for item in totals),
+        pending_points=sum(item.pending_points for item in totals),
+    )
+
+
+def _format_document_stats(stats: ReleaseDocumentStats) -> str:
+    if stats.total == 0:
+        return "-"
+    return f"已完成 {stats.completed}/{stats.total}"
+
+
+def _format_score_stats(
+    stats: ReleaseScoreStats,
+    *,
+    include_items: bool = False,
+) -> str:
+    if stats.total_items == 0:
+        return "-"
+
+    if include_items:
+        return (
+            f"已确认 {stats.confirmed_items} 项 / {stats.confirmed_points} 分，"
+            f"待确认 {stats.pending_items} 项 / {stats.pending_points} 分"
+        )
+
+    if stats.pending_items or stats.pending_points:
+        return f"已确认 {stats.confirmed_points} 分，待确认 {stats.pending_points} 分"
+    return f"已确认 {stats.confirmed_points} 分"
 
 
 def _latest_release_date(entries: list[ReleaseEntry]) -> str:
@@ -589,6 +984,8 @@ def _build_release_entry(
     version_data: dict[str, object],
     architecture_data: dict[str, object],
     raw_history: list[dict[str, object]],
+    documents: list[ReleaseDocumentItem],
+    score_items: list[ReleaseScoreItem],
     home_setting: str,
     slug: str,
     log_target: Path,
@@ -638,6 +1035,8 @@ def _build_release_entry(
         slug=slug,
         log_target=log_target,
         log_route=_route_from_target(log_target),
+        documents=documents,
+        score_items=score_items,
         history=history,
     )
 
@@ -706,6 +1105,27 @@ def _collect_release_entries() -> list[ReleaseEntry]:
                     "notes": raw_architecture.get("architecture_notes"),
                 }
                 architecture_history = _as_table_list(raw_architecture.get("history"))
+                raw_doc_checklist = raw_architecture.get("doc_checklist")
+                raw_documents = _as_table_list(raw_architecture.get("documents"))
+                if raw_doc_checklist is not None and raw_documents:
+                    raise SystemExit(
+                        "Do not mix doc_checklist with documents in "
+                        f"{manifest_path.relative_to(ROOT_DIR).as_posix()} / {architecture_name}"
+                    )
+                architecture_documents = _parse_release_doc_checklist(
+                    raw_doc_checklist,
+                    manifest_path=manifest_path,
+                    architecture_name=architecture_name,
+                ) or _parse_release_documents(
+                    raw_documents,
+                    manifest_path=manifest_path,
+                    architecture_name=architecture_name,
+                )
+                architecture_score_items = _parse_release_score_items(
+                    _as_table_list(raw_architecture.get("score_items")),
+                    manifest_path=manifest_path,
+                    architecture_name=architecture_name,
+                )
                 architecture_home = _as_string(raw_architecture.get("home"), module_home)
 
                 entries.append(
@@ -720,6 +1140,8 @@ def _collect_release_entries() -> list[ReleaseEntry]:
                         version_data=architecture_version_data,
                         architecture_data=architecture_runtime_data,
                         raw_history=architecture_history,
+                        documents=architecture_documents,
+                        score_items=architecture_score_items,
                         home_setting=architecture_home,
                         slug=slug,
                         log_target=log_target,
@@ -728,6 +1150,27 @@ def _collect_release_entries() -> list[ReleaseEntry]:
             continue
 
         architecture_name = _as_string(architecture_data.get("name"), "default")
+        raw_doc_checklist = architecture_data.get("doc_checklist")
+        raw_documents = _as_table_list(architecture_data.get("documents"))
+        if raw_doc_checklist is not None and raw_documents:
+            raise SystemExit(
+                "Do not mix doc_checklist with documents in "
+                f"{manifest_path.relative_to(ROOT_DIR).as_posix()} / {architecture_name}"
+            )
+        architecture_documents = _parse_release_doc_checklist(
+            raw_doc_checklist,
+            manifest_path=manifest_path,
+            architecture_name=architecture_name,
+        ) or _parse_release_documents(
+            raw_documents,
+            manifest_path=manifest_path,
+            architecture_name=architecture_name,
+        )
+        architecture_score_items = _parse_release_score_items(
+            _as_table_list(architecture_data.get("score_items")),
+            manifest_path=manifest_path,
+            architecture_name=architecture_name,
+        )
         entries.append(
             _build_release_entry(
                 manifest_path=manifest_path,
@@ -740,6 +1183,8 @@ def _collect_release_entries() -> list[ReleaseEntry]:
                 version_data=version_data,
                 architecture_data=architecture_data,
                 raw_history=raw_history,
+                documents=architecture_documents,
+                score_items=architecture_score_items,
                 home_setting=module_home,
                 slug=slug,
                 log_target=log_target,
@@ -751,8 +1196,8 @@ def _collect_release_entries() -> list[ReleaseEntry]:
 
 def _build_release_table(entries: list[ReleaseEntry], from_target: Path) -> list[str]:
     lines = [
-        "| 工具 | 架构线 | 版本 | 通道 | 架构形态 | 运行时 | 发布时间 |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        "| 工具 | 架构线 | 版本 | 通道 | 文档点检 | 架构形态 | 运行时 | 发布时间 |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
 
     for entry in entries:
@@ -760,15 +1205,34 @@ def _build_release_table(entries: list[ReleaseEntry], from_target: Path) -> list
         if entry.home_target is not None:
             module_label = f"[{entry.module_name}]({_relative_doc_link(from_target, entry.home_target)})"
 
+        document_stats = _format_document_stats(_document_stats(entry.documents))
         lines.append(
             "| "
             f"{module_label} | "
             f"`{_display_architecture_name(entry.architecture_name)}` | "
             f"`{entry.version}` | "
             f"`{entry.channel}` | "
+            f"{document_stats} | "
             f"{entry.architecture_style or '-'} | "
             f"{entry.runtime or '-'} | "
             f"{entry.released_at or '-'} |"
+        )
+
+    return lines
+
+
+def _build_document_checklist_table(entry: ReleaseEntry, from_target: Path) -> list[str]:
+    lines = [
+        "| 文档项 | 状态 | 路径 |",
+        "| :--- | :--- | :--- |",
+    ]
+
+    for item in entry.documents:
+        lines.append(
+            "| "
+            f"{_table_text(item.label)} | "
+            f"{_format_document_status(item.status)} | "
+            f"{_format_release_doc_path(entry, item, from_target)} |"
         )
 
     return lines
@@ -852,12 +1316,14 @@ def _build_release_home_summary(entries: list[ReleaseEntry]) -> str:
 
     counts = Counter(entry.channel for entry in entries)
     history_records = _all_history_records(entries)
+    document_stats = _aggregate_document_stats(entries)
     lines = [
         "> 该模块由 `build-docs` 自动生成，数据来源于各子模块目录下的 `release.toml`。",
         "",
         f"- 工具总数: `{_tool_count(entries)}`",
         f"- 架构线总数: `{len(entries)}`",
         f"- 发布通道: `{', '.join(f'{channel}={count}' for channel, count in sorted(counts.items()))}`",
+        f"- 文档点检: `{_format_document_stats(document_stats)}`",
         f"- 当前版本最近发布时间: `{_latest_release_date(entries)}`",
         f"- 历史记录数: `{_history_count(entries)}`",
         f"- 历史时间线最近发布时间: `{_latest_history_date(entries)}`",
@@ -882,6 +1348,7 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     history_records = _all_history_records(entries)
     grouped_entries = _group_release_entries(entries)
+    document_stats = _aggregate_document_stats(entries)
     lines = [
         "# 版本发布中心",
         "",
@@ -890,6 +1357,7 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
         f"- 生成时间: `{generated_at}`",
         f"- 工具总数: `{_tool_count(entries)}`",
         f"- 架构线总数: `{len(entries)}`",
+        f"- 文档点检: `{_format_document_stats(document_stats)}`",
         f"- 当前版本最近发布时间: `{_latest_release_date(entries)}`",
         f"- 历史记录数: `{_history_count(entries)}`",
         f"- 历史时间线最近发布时间: `{_latest_history_date(entries)}`",
@@ -926,6 +1394,7 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
 
     for group in grouped_entries:
         primary = group[0]
+        group_document_stats = _aggregate_document_stats(group)
         lines.extend(
             [
                 f"### {primary.module_name}",
@@ -933,6 +1402,7 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
                 f"- 模块目录: `app/{primary.module_relative_dir.as_posix()}`",
                 f"- 负责人: `{primary.owner or '-'}`",
                 f"- 架构线数量: `{len(group)}`",
+                f"- 文档点检: `{_format_document_stats(group_document_stats)}`",
                 f"- 发布日志: [{primary.log_route}]({_relative_doc_link(RELEASE_CENTER_TARGET, primary.log_target)})",
             ]
         )
@@ -944,12 +1414,14 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
             lines.append(f"- 模块说明: {primary.module_summary}")
         lines.extend(["", "架构线:"])
         for entry in group:
+            entry_document_stats = _format_document_stats(_document_stats(entry.documents))
             lines.append(
                 "- "
                 f"`{_display_architecture_name(entry.architecture_name)}` -> "
                 f"`{entry.version}` / `{entry.channel}` / "
                 f"{entry.architecture_style or '-'} / "
-                f"{entry.runtime or '-'}"
+                f"{entry.runtime or '-'} / "
+                f"文档: {entry_document_stats}"
             )
         lines.append("")
 
@@ -959,6 +1431,7 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
 def _build_release_history_markdown(entries: list[ReleaseEntry]) -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     records = _all_history_records(entries)
+    document_stats = _aggregate_document_stats(entries)
     lines = [
         "# 发布历史时间线",
         "",
@@ -966,6 +1439,7 @@ def _build_release_history_markdown(entries: list[ReleaseEntry]) -> str:
         "",
         f"- 生成时间: `{generated_at}`",
         f"- 历史记录数: `{len(records)}`",
+        f"- 文档点检: `{_format_document_stats(document_stats)}`",
         f"- 最近发布时间: `{_latest_history_date(entries)}`",
         f"- 返回版本中心: [{_route_from_target(RELEASE_CENTER_TARGET)}]({_relative_doc_link(RELEASE_HISTORY_TARGET, RELEASE_CENTER_TARGET)})",
         "",
@@ -998,6 +1472,7 @@ def _build_release_history_markdown(entries: list[ReleaseEntry]) -> str:
 
 def _build_module_release_log_markdown(entries: list[ReleaseEntry]) -> str:
     primary = entries[0]
+    module_document_stats = _aggregate_document_stats(entries)
     lines = [
         f"# {primary.module_name} 发布日志",
         "",
@@ -1005,6 +1480,7 @@ def _build_module_release_log_markdown(entries: list[ReleaseEntry]) -> str:
         "",
         f"- 模块目录: `app/{primary.module_relative_dir.as_posix()}`",
         f"- 架构线数量: `{len(entries)}`",
+        f"- 文档点检: `{_format_document_stats(module_document_stats)}`",
         f"- 历史记录数: `{sum(len(item.history) for item in entries)}`",
         f"- 返回版本中心: [{_route_from_target(RELEASE_CENTER_TARGET)}]({_relative_doc_link(primary.log_target, RELEASE_CENTER_TARGET)})",
         f"- 查看全局时间线: [{_route_from_target(RELEASE_HISTORY_TARGET)}]({_relative_doc_link(primary.log_target, RELEASE_HISTORY_TARGET)})",
@@ -1020,6 +1496,7 @@ def _build_module_release_log_markdown(entries: list[ReleaseEntry]) -> str:
     lines.extend(_build_release_table(entries, primary.log_target))
 
     for entry in entries:
+        document_stats = _document_stats(entry.documents)
         lines.extend(
             [
                 "",
@@ -1034,6 +1511,7 @@ def _build_module_release_log_markdown(entries: list[ReleaseEntry]) -> str:
                 f"- 对外接口: {_format_code_list(entry.interfaces)}",
                 f"- 运行平台: {_format_code_list(entry.platforms)}",
                 f"- 依赖模块: {_format_code_list(entry.dependencies)}",
+                f"- 文档点检: `{_format_document_stats(document_stats)}`",
             ]
         )
         if entry.home_target is not None and entry.home_route is not None:
@@ -1046,6 +1524,14 @@ def _build_module_release_log_markdown(entries: list[ReleaseEntry]) -> str:
             lines.append(f"- 当前版本说明: {entry.release_notes}")
         if entry.architecture_notes:
             lines.append(f"- 架构说明: {entry.architecture_notes}")
+
+        lines.extend(["", "### 文档点检", ""])
+        lines.append("版本迭代的变更记录建议直接维护在“用户手册”中。")
+        lines.append("")
+        if entry.documents:
+            lines.extend(_build_document_checklist_table(entry, primary.log_target))
+        else:
+            lines.append("当前架构线未配置文档点检项。")
 
         lines.extend(["", "### 历史概览", ""])
         lines.extend(
@@ -1217,10 +1703,12 @@ def _print_routes(routes: list[tuple[Path, str]]) -> None:
 def _print_release_entries(entries: list[ReleaseEntry]) -> None:
     for entry in entries:
         route = entry.home_route or "-"
+        document_stats = _format_document_stats(_document_stats(entry.documents))
         print(
             f"{entry.manifest_path.relative_to(ROOT_DIR).as_posix()} -> "
             f"{entry.module_name} / {_display_architecture_name(entry.architecture_name)} "
-            f"(v{entry.version}, {entry.channel}, {route}, history={len(entry.history)})"
+            f"(v{entry.version}, {entry.channel}, {route}, "
+            f"docs={document_stats}, history={len(entry.history)})"
         )
 
 
@@ -1250,6 +1738,7 @@ def scan_cli() -> None:
 def scan_releases_cli() -> None:
     entries = _collect_release_entries()
     counts = Counter(entry.channel for entry in entries)
+    document_stats = _aggregate_document_stats(entries)
     print(
         f"Discovered {_tool_count(entries)} tools / {len(entries)} architecture lines under {APP_DIR}"
     )
@@ -1261,6 +1750,7 @@ def scan_releases_cli() -> None:
     else:
         print("Release channel stats: none")
     print(f"Release history entries: {_history_count(entries)}")
+    print(f"Document checklist stats: {_format_document_stats(document_stats)}")
     _print_release_entries(entries)
 
 

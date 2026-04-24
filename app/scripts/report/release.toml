@@ -18,6 +18,7 @@ interfaces = ["Static Docs", "Batch Report"]
 platforms = ["Windows"]
 dependencies = ["scripts"]
 notes = "作为 scripts 下的子模块，重点沉淀统计口径、导出流程和版本记录。"
+doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md", design_spec = "", test_report = "" }
 
 [[history]]
 version = "0.4.2"

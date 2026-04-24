@@ -18,6 +18,7 @@ interfaces = ["Static HTML", "Theme Preview"]
 platforms = ["Windows", "Offline HTML"]
 dependencies = ["scripts", "report"]
 notes = "主要承担样式验证和插件能力回归，不参与业务执行链路。"
+doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md", design_spec = "", test_report = "" }
 
 [[history]]
 version = "0.1.0"
