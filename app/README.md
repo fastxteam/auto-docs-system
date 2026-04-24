@@ -16,9 +16,10 @@
 3. 功能说明用单独的 `*.md`
 4. 执行 `uv run build-docs`
 
-## 版本发布总览
+## 管理入口
 
-<!-- AUTO_DOCS:RELEASE_SUMMARY -->
+- 版本发布中心：见 [release-center/index.md](release-center/index.md)
+- 贡献台账中心：见 [contribution-center/index.md](contribution-center/index.md)
 
 ## 能力示例
 

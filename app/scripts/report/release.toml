@@ -8,9 +8,11 @@ home = "README.md"
 current = "0.4.2"
 channel = "beta"
 released_at = "2026-04-22"
+owner = "Release Manager"
 notes = "正在补齐报表脚本与导出链路，先以文档方式管理接口和版本。"
 
 [architecture]
+owner = "Data Architecture"
 style = "Reporting Pipeline"
 runtime = "Python 3.13"
 entrypoints = []
@@ -24,6 +26,7 @@ doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md
 version = "0.4.2"
 channel = "beta"
 released_at = "2026-04-22"
+owner = "Release Manager"
 title = "补齐报表模块版本元数据"
 summary = "将报表模块纳入版本中心，开始记录架构与发布说明。"
 changes = [
@@ -36,6 +39,7 @@ breaking_changes = []
 version = "0.4.0"
 channel = "beta"
 released_at = "2026-04-16"
+owner = "Release Manager"
 title = "报表目录重构"
 summary = "拆分报表说明目录，为后续导出脚本留出结构空间。"
 changes = [

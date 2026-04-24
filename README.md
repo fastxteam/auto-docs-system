@@ -52,6 +52,7 @@ app/
 uv sync
 uv run scan-docs
 uv run scan-releases
+uv run scan-contributions
 uv run build-docs
 ```
 
@@ -91,9 +92,11 @@ home = "README.md"
 current = "1.3.0"
 channel = "stable"
 released_at = "2026-04-23"
+owner = "Release Manager"
 notes = "统一文档构建与版本汇总入口。"
 
 [architecture]
+owner = "Architecture Team"
 style = "CLI + Batch"
 runtime = "Python 3.13"
 entrypoints = ["cleanup.py"]
@@ -107,6 +110,7 @@ doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md
 version = "1.3.0"
 channel = "stable"
 released_at = "2026-04-23"
+owner = "Release Manager"
 title = "接入版本中心与发布日志"
 summary = "新增汇总页、时间线和模块日志页。"
 changes = [
@@ -122,8 +126,11 @@ architecture_notes = "版本信息改为从 release.toml 渲染。"
 
 - `[version]` 表示当前版本快照
 - `[architecture]` 表示当前唯一架构线
+- `[version].owner` 表示当前版本 release owner
+- `[architecture].owner` 表示当前架构 owner
 - `doc_checklist` 表示该架构线下的固定文档点检清单
 - `[[history]]` 表示历史发布记录，按版本维度输出日志
+- `[[history]].owner` 表示对应历史版本的 release owner
 - 即使不写 `[[history]]`，系统也会用 `[version]` 自动兜底生成一条当前版本记录
 
 示例 2，同一个工具下按架构线拆分，例如 `ARC_V1` / `ARC_V2`：
@@ -138,6 +145,8 @@ home = "README.md"
 [[architectures]]
 name = "ARC_V1"
 summary = "旧架构线，继续维护稳定任务。"
+owner = "Architecture Team"
+release_owner = "Release Manager"
 home = "README.md"
 style = "CLI + Batch"
 runtime = "Python 3.13"
@@ -156,6 +165,7 @@ doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md
 version = "1.3.0"
 channel = "stable"
 released_at = "2026-04-23"
+owner = "Release Manager"
 title = "ARC_V1 维护版本"
 summary = "补充版本中心和历史日志。"
 changes = [
@@ -167,6 +177,8 @@ breaking_changes = []
 [[architectures]]
 name = "ARC_V2"
 summary = "新架构线，用于承接后续模块化改造。"
+owner = "Architecture Group"
+release_owner = "Release Manager"
 home = "README.md"
 style = "CLI + Modular Pipeline"
 runtime = "Python 3.13"
@@ -185,6 +197,7 @@ doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md
 version = "2.0.0-beta.1"
 channel = "beta"
 released_at = "2026-04-23"
+owner = "Release Manager"
 title = "ARC_V2 首个测试版本"
 summary = "为后续模块化拆分建立新架构线。"
 changes = [
@@ -199,8 +212,11 @@ breaking_changes = [
 多架构模式说明：
 
 - `[[architectures]]` 表示同一个工具下的一条架构线
+- `owner` 表示架构 owner
+- `release_owner` 表示当前版本 release owner
 - `doc_checklist` 表示该架构线下的固定文档点检清单
 - `[[architectures.history]]` 表示该架构线自己的版本历史
+- `[[architectures.history]].owner` 表示对应历史版本的 release owner
 - 生成结果仍然是“一个工具一个发布日志页”，但页内会按 `ARC_V1`、`ARC_V2` 分节展示
 - `release-center/index.md` 会汇总所有工具和架构线
 - `release-center/history/index.md` 会把所有架构线的历史记录合并成全局时间线
@@ -217,11 +233,39 @@ breaking_changes = [
 
 关于积分管理的建议：
 
-- 不建议继续把积分明细写在 `release.toml` 里
-- `release.toml` 更适合做“版本快照 + 文档点检”，不适合做人/分值/审批流管理
-- 如果后面一定要做积分，建议单独维护一份“贡献台账”，按人和周期管理，而不是按版本管理
-- 推荐位置可以是 `auto_docs/contribution_registry/2026Q2.toml` 这类独立文件，后续再由脚本汇总
+- 不再维护独立的积分台账 TOML
+- 积分直接由各工具自己的 `release.toml` 自动推导
+- 架构负责人积分来自 `doc_checklist`
+- 发布负责人积分来自 `history.owner` 或当前 `release_owner`
 - 旧格式 `documents` / `score_items` 仍兼容读取，但不再推荐继续新增
+
+## 贡献台账
+
+贡献台账不再维护独立 TOML，直接由各工具的 `release.toml` 自动推导。
+
+执行：
+
+```powershell
+uv run scan-contributions
+uv run build-docs
+```
+
+约定：
+
+- `architecture.owner` 或 `architectures.owner` 表示架构负责人
+- `version.owner` 或 `architectures.release_owner` 表示当前版本发布负责人
+- `history.owner` 或 `architectures.history.owner` 表示历史版本发布负责人
+- `doc_checklist` 会自动折算文档积分
+- `history` 会自动折算发布积分
+- 构建后自动生成：
+  `contribution-center/index.md`
+
+积分折算规则：
+
+- 架构负责人：
+  `软著=80`、`专利=100`、`用户手册=20`、`设计方案=30`、`测试报告=20`
+- 发布负责人：
+  每个历史版本固定计 `10` 分
 
 ## 你最关心的两个问题
 

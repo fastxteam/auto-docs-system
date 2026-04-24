@@ -8,9 +8,11 @@ home = "README.md"
 current = "0.1.0"
 channel = "draft"
 released_at = "2026-04-23"
+owner = "Release Manager"
 notes = "演示页随主题能力演进持续调整，不对外承诺稳定接口。"
 
 [architecture]
+owner = "Docs Architecture"
 style = "Documentation Showcase"
 runtime = "MkDocs + Python 3.13"
 entrypoints = []
@@ -24,6 +26,7 @@ doc_checklist = { software_copyright = "", patent = "", user_manual = "README.md
 version = "0.1.0"
 channel = "draft"
 released_at = "2026-04-23"
+owner = "Release Manager"
 title = "接入主题能力演示"
 summary = "增加 iconify、hover card、echarts、codexec 与 excalidraw 示例。"
 changes = [
@@ -36,6 +39,7 @@ breaking_changes = []
 version = "0.0.1"
 channel = "draft"
 released_at = "2026-04-21"
+owner = "Release Manager"
 title = "演示页初始化"
 summary = "用于验证 shadcn-lwq 样式与本地静态链接。"
 changes = [

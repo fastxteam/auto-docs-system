@@ -24,7 +24,7 @@ RELEASE_MANIFEST_NAME = "release.toml"
 RELEASE_CENTER_TARGET = Path("release-center") / "index.md"
 RELEASE_HISTORY_TARGET = Path("release-center") / "history" / "index.md"
 RELEASE_MODULE_LOGS_DIR = Path("release-center") / "modules"
-HOME_RELEASE_PLACEHOLDER = "<!-- AUTO_DOCS:RELEASE_SUMMARY -->"
+CONTRIBUTION_CENTER_TARGET = Path("contribution-center") / "index.md"
 
 IGNORED_PARTS = {
     ".doc_build",
@@ -43,6 +43,14 @@ DOC_CHECKLIST_ITEMS = (
     ("test_report", "测试报告"),
 )
 DOC_CHECKLIST_LABELS = dict(DOC_CHECKLIST_ITEMS)
+DOC_CHECKLIST_POINTS = {
+    "software_copyright": 80,
+    "patent": 100,
+    "user_manual": 20,
+    "design_spec": 30,
+    "test_report": 20,
+}
+RELEASE_VERSION_POINTS = 10
 DOC_CHECKLIST_ALIASES = {
     "soft_copyright": "software_copyright",
     "software_copyright": "software_copyright",
@@ -111,6 +119,8 @@ class ReleaseEntry:
     platforms: list[str]
     dependencies: list[str]
     architecture_notes: str
+    architecture_owner: str
+    release_owner: str
     home_target: Path | None
     home_route: str | None
     slug: str
@@ -126,6 +136,7 @@ class ReleaseHistoryItem:
     version: str
     channel: str
     released_at: str
+    owner: str
     title: str
     summary: str
     changes: list[str]
@@ -147,6 +158,26 @@ class ReleaseScoreStats:
     pending_items: int
     confirmed_points: int
     pending_points: int
+
+
+@dataclass(slots=True)
+class ContributionRecord:
+    manifest_path: Path
+    owner: str
+    role: str
+    module_name: str
+    module_relative_dir: Path
+    architecture_name: str
+    version: str
+    category: str
+    title: str
+    status: str
+    occurred_at: str
+    points: int
+    note: str
+    source_target: Path
+    source_anchor: str | None
+    source_label: str
 
 
 def _is_hidden_or_ignored(relative_path: Path) -> bool:
@@ -845,6 +876,265 @@ def _format_score_stats(
     return f"已确认 {stats.confirmed_points} 分"
 
 
+def _contribution_status_confirmed(status: str) -> bool:
+    return _status_key(status) in {
+        "confirmed",
+        "approved",
+        "accepted",
+        "done",
+        "completed",
+    }
+
+
+def _contribution_status_label(status: str) -> str:
+    key = _status_key(status)
+    if _contribution_status_confirmed(status):
+        return "已确认"
+    if key in {"draft", "in_progress", "working"}:
+        return "处理中"
+    return "待确认"
+
+
+def _contribution_role_label(role: str) -> str:
+    if role == "architecture_owner":
+        return "架构负责人"
+    if role == "release_owner":
+        return "发布负责人"
+    return role
+
+
+def _doc_contribution_points(item: ReleaseDocumentItem) -> int:
+    if not _is_document_completed(item.status):
+        return 0
+    return DOC_CHECKLIST_POINTS.get(item.key, 0)
+
+
+def _contribution_record_sort_key(record: ContributionRecord) -> tuple[datetime, str, str]:
+    return (
+        _parse_release_datetime(record.occurred_at) or datetime.min,
+        record.owner,
+        record.title,
+    )
+
+
+def _collect_contribution_records(entries: list[ReleaseEntry]) -> list[ContributionRecord]:
+    records: list[ContributionRecord] = []
+    for entry in entries:
+        source_anchor = _heading_anchor(_display_architecture_name(entry.architecture_name))
+        if entry.architecture_owner:
+            for item in entry.documents:
+                points = _doc_contribution_points(item)
+                records.append(
+                    ContributionRecord(
+                        manifest_path=entry.manifest_path,
+                        owner=entry.architecture_owner,
+                        role="architecture_owner",
+                        module_name=entry.module_name,
+                        module_relative_dir=entry.module_relative_dir,
+                        architecture_name=entry.architecture_name,
+                        version=entry.version,
+                        category="文档点检",
+                        title=item.label,
+                        status=item.status,
+                        occurred_at=entry.released_at,
+                        points=points,
+                        note=item.path,
+                        source_target=entry.log_target,
+                        source_anchor=source_anchor,
+                        source_label=f"{entry.module_name} / {_display_architecture_name(entry.architecture_name)}",
+                    )
+                )
+
+        for item in entry.history:
+            owner = item.owner or entry.release_owner
+            if not owner:
+                continue
+            records.append(
+                ContributionRecord(
+                    manifest_path=entry.manifest_path,
+                    owner=owner,
+                    role="release_owner",
+                    module_name=entry.module_name,
+                    module_relative_dir=entry.module_relative_dir,
+                    architecture_name=entry.architecture_name,
+                    version=item.version,
+                    category="版本发布",
+                    title=item.title or f"{entry.module_name} {_display_architecture_name(entry.architecture_name)} v{item.version}",
+                    status="confirmed" if item.released_at else "pending",
+                    occurred_at=item.released_at,
+                    points=RELEASE_VERSION_POINTS if item.released_at else 0,
+                    note=item.summary,
+                    source_target=entry.log_target,
+                    source_anchor=source_anchor,
+                    source_label=f"{entry.module_name} / {_display_architecture_name(entry.architecture_name)}",
+                )
+            )
+
+    records.sort(key=_contribution_record_sort_key, reverse=True)
+    return records
+
+
+def _contribution_people(records: list[ContributionRecord]) -> list[str]:
+    return sorted({record.owner for record in records if record.owner})
+
+
+def _contribution_modules(records: list[ContributionRecord]) -> list[str]:
+    modules = {record.module_name for record in records if record.module_name}
+    return sorted(modules)
+
+
+def _build_contribution_people_table(records: list[ContributionRecord]) -> list[str]:
+    lines = [
+        "| Owner | 角色 | 工具数 | 架构线数 | 已完成文档 | 发布版本 | 总积分 | 最近活动 |",
+        "| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- |",
+    ]
+    for owner in _contribution_people(records):
+        owner_records = [item for item in records if item.owner == owner]
+        doc_records = [item for item in owner_records if item.role == "architecture_owner"]
+        release_records = [item for item in owner_records if item.role == "release_owner"]
+        completed_docs = [item for item in doc_records if _contribution_status_confirmed(item.status)]
+        modules = {item.module_name for item in owner_records if item.module_name}
+        architectures = {
+            f"{item.module_name}/{_display_architecture_name(item.architecture_name)}"
+            for item in owner_records
+            if item.module_name
+        }
+        latest = max(owner_records, key=_contribution_record_sort_key)
+        roles = sorted({_contribution_role_label(item.role) for item in owner_records})
+        lines.append(
+            "| "
+            f"{_table_text(owner)} | "
+            f"{_table_text(' / '.join(roles))} | "
+            f"{len(modules)} | "
+            f"{len(architectures)} | "
+            f"{len(completed_docs)} | "
+            f"{len(release_records)} | "
+            f"{sum(item.points for item in owner_records)} | "
+            f"{_table_text(latest.occurred_at or '-')}"
+            " |"
+        )
+    return lines
+
+
+def _build_contribution_module_table(records: list[ContributionRecord]) -> list[str]:
+    lines = [
+        "| 工具 | 架构线数 | 架构 Owner | 版本 Owner | 已完成文档 | 发布版本 | 总积分 |",
+        "| :--- | ---: | :--- | :--- | ---: | ---: | ---: |",
+    ]
+    for module in _contribution_modules(records):
+        module_records = [item for item in records if item.module_name == module]
+        doc_records = [item for item in module_records if item.role == "architecture_owner"]
+        release_records = [item for item in module_records if item.role == "release_owner"]
+        architecture_owners = sorted({item.owner for item in doc_records if item.owner})
+        release_owners = sorted({item.owner for item in release_records if item.owner})
+        completed_docs = [item for item in doc_records if _contribution_status_confirmed(item.status)]
+        architectures = {
+            _display_architecture_name(item.architecture_name)
+            for item in module_records
+            if item.architecture_name
+        }
+        lines.append(
+            "| "
+            f"`{module}` | "
+            f"{len(architectures)} | "
+            f"{_table_text(', '.join(architecture_owners) if architecture_owners else '-')} | "
+            f"{_table_text(', '.join(release_owners) if release_owners else '-')} | "
+            f"{len(completed_docs)} | "
+            f"{len(release_records)} | "
+            f"{sum(item.points for item in module_records)} |"
+        )
+    return lines
+
+
+def _format_contribution_source(record: ContributionRecord, from_target: Path) -> str:
+    href = _relative_doc_link(from_target, record.source_target)
+    if record.source_anchor:
+        href = f"{href}#{record.source_anchor}"
+    return f"[{_table_text(record.source_label)}]({href})"
+
+
+def _build_contribution_record_table(records: list[ContributionRecord], from_target: Path) -> list[str]:
+    lines = [
+        "| 日期 | Owner | 角色 | 工具 | 架构线 | 类别 | 内容 | 状态 | 积分 | 来源 |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- |",
+    ]
+    for record in records:
+        lines.append(
+            "| "
+            f"{_table_text(record.occurred_at)} | "
+            f"{_table_text(record.owner)} | "
+            f"{_table_text(_contribution_role_label(record.role))} | "
+            f"{_table_text(record.module_name)} | "
+            f"{_table_text(_display_architecture_name(record.architecture_name))} | "
+            f"{_table_text(record.category)} | "
+            f"{_table_text(record.title)} | "
+            f"{_contribution_status_label(record.status)} | "
+            f"{record.points} | "
+            f"{_format_contribution_source(record, from_target)} |"
+        )
+    return lines
+
+
+def _build_contribution_center_markdown(entries: list[ReleaseEntry]) -> str:
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    records = _collect_contribution_records(entries)
+    confirmed = [item for item in records if _contribution_status_confirmed(item.status)]
+    architecture_records = [item for item in records if item.role == "architecture_owner"]
+    release_records = [item for item in records if item.role == "release_owner"]
+    lines = [
+        "# 贡献台账中心",
+        "",
+        "> 该页面由 `build-docs` 自动生成，直接根据各工具的 `release.toml` 推导架构负责人、发布负责人和文档完成情况。",
+        "",
+        f"- 生成时间: `{generated_at}`",
+        f"- Owner 数: `{len(_contribution_people(records))}`",
+        f"- 架构负责人记录数: `{len(architecture_records)}`",
+        f"- 发布负责人记录数: `{len(release_records)}`",
+        f"- 涉及工具数: `{len(_contribution_modules(records))}`",
+        f"- 已确认记录: `{len(confirmed)}`",
+        f"- 已确认积分: `{sum(item.points for item in confirmed)}`",
+        "",
+    ]
+
+    if not records:
+        lines.append("当前未发现任何可推导的贡献记录，请先在各模块 `release.toml` 中补齐 owner 和文档点检。")
+        return "\n".join(lines)
+
+    lines.extend(
+        [
+            "## 统计规则",
+            "",
+            "- 架构负责人积分: 由当前架构线 `doc_checklist` 中已完成的文档自动折算。",
+            "- 发布负责人积分: 由 `history.owner` 或当前 `release_owner` 自动折算，每个历史版本固定计 `10` 分。",
+            "- 文档点检分值: `软著=80`、`专利=100`、`用户手册=20`、`设计方案=30`、`测试报告=20`。",
+            "",
+            "## Owner 汇总",
+            "",
+        ]
+    )
+    lines.extend(_build_contribution_people_table(records))
+    if _contribution_modules(records):
+        lines.extend(["", "## 工具汇总", ""])
+        lines.extend(_build_contribution_module_table(records))
+    lines.extend(["", "## 最近记录", ""])
+    lines.extend(_build_contribution_record_table(records[:30], CONTRIBUTION_CENTER_TARGET))
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _write_contribution_pages(entries: list[ReleaseEntry]) -> None:
+    for target in [CONTRIBUTION_CENTER_TARGET]:
+        target_path = DOCS_DIR / target
+        if target_path.exists():
+            raise SystemExit(
+                "Generated contribution page conflicts with an existing document: "
+                f"{target_path.relative_to(ROOT_DIR).as_posix()}"
+            )
+
+    center_path = DOCS_DIR / CONTRIBUTION_CENTER_TARGET
+    center_path.parent.mkdir(parents=True, exist_ok=True)
+    center_path.write_text(_build_contribution_center_markdown(entries), encoding="utf-8")
+
 def _latest_release_date(entries: list[ReleaseEntry]) -> str:
     dates = sorted(entry.released_at for entry in entries if entry.released_at)
     return dates[-1] if dates else "-"
@@ -870,6 +1160,7 @@ def _build_history_items(
     current_version = _as_string(version_data.get("current"))
     current_channel = _as_string(version_data.get("channel"), "stable")
     current_released_at = _as_string(version_data.get("released_at"))
+    current_owner = _as_string(version_data.get("owner"))
     current_notes = _as_string(version_data.get("notes"))
     current_architecture_notes = _as_string(architecture_data.get("notes"))
 
@@ -900,6 +1191,7 @@ def _build_history_items(
                     raw_item.get("released_at"),
                     current_released_at if is_current else "",
                 ),
+                owner=_as_string(raw_item.get("owner"), current_owner if is_current else ""),
                 title=_as_string(
                     raw_item.get("title"),
                     f"{module_name} / {_display_architecture_name(architecture_name)} {version}",
@@ -924,6 +1216,7 @@ def _build_history_items(
                 version=current_version,
                 channel=current_channel,
                 released_at=current_released_at,
+                owner=current_owner,
                 title=f"{module_name} / {_display_architecture_name(architecture_name)} {current_version}",
                 summary=current_notes,
                 changes=[],
@@ -1030,6 +1323,8 @@ def _build_release_entry(
         platforms=_as_string_list(architecture_data.get("platforms")),
         dependencies=_as_string_list(architecture_data.get("dependencies")),
         architecture_notes=_as_string(architecture_data.get("notes")),
+        architecture_owner=_as_string(architecture_data.get("owner")),
+        release_owner=_as_string(version_data.get("owner")),
         home_target=home_target,
         home_route=home_route,
         slug=slug,
@@ -1093,9 +1388,11 @@ def _collect_release_entries() -> list[ReleaseEntry]:
                     "current": raw_architecture.get("current"),
                     "channel": raw_architecture.get("channel"),
                     "released_at": raw_architecture.get("released_at"),
+                    "owner": raw_architecture.get("release_owner"),
                     "notes": raw_architecture.get("notes"),
                 }
                 architecture_runtime_data = {
+                    "owner": raw_architecture.get("owner"),
                     "style": raw_architecture.get("style"),
                     "runtime": raw_architecture.get("runtime"),
                     "entrypoints": raw_architecture.get("entrypoints"),
@@ -1279,6 +1576,7 @@ def _append_history_item_details(
             "",
             f"- 发布时间: `{item.released_at or '-'}`",
             f"- 发布通道: `{item.channel}`",
+            f"- 发布 Owner: `{item.owner or entry.release_owner or '-'}`",
             f"- 架构线: `{_display_architecture_name(entry.architecture_name)}`",
             f"- 模块日志: [{entry.log_route}]({_entry_log_link(entry, from_target)})",
         ]
@@ -1379,6 +1677,7 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
             "## 导航",
             "",
             f"- 全局历史时间线: [release-center/history/index.md]({_relative_doc_link(RELEASE_CENTER_TARGET, RELEASE_HISTORY_TARGET)})",
+            f"- 贡献台账中心: [contribution-center/index.md]({_relative_doc_link(RELEASE_CENTER_TARGET, CONTRIBUTION_CENTER_TARGET)})",
         ]
     )
     lines.extend(
@@ -1421,7 +1720,9 @@ def _build_release_center_markdown(entries: list[ReleaseEntry]) -> str:
                 f"`{entry.version}` / `{entry.channel}` / "
                 f"{entry.architecture_style or '-'} / "
                 f"{entry.runtime or '-'} / "
-                f"文档: {entry_document_stats}"
+                f"文档: {entry_document_stats} / "
+                f"架构Owner: {entry.architecture_owner or '-'} / "
+                f"版本Owner: {entry.release_owner or '-'}"
             )
         lines.append("")
 
@@ -1511,6 +1812,8 @@ def _build_module_release_log_markdown(entries: list[ReleaseEntry]) -> str:
                 f"- 对外接口: {_format_code_list(entry.interfaces)}",
                 f"- 运行平台: {_format_code_list(entry.platforms)}",
                 f"- 依赖模块: {_format_code_list(entry.dependencies)}",
+                f"- 架构 Owner: `{entry.architecture_owner or '-'}`",
+                f"- 当前版本 Owner: `{entry.release_owner or '-'}`",
                 f"- 文档点检: `{_format_document_stats(document_stats)}`",
             ]
         )
@@ -1579,24 +1882,6 @@ def _write_release_pages(entries: list[ReleaseEntry]) -> None:
         module_log_path.parent.mkdir(parents=True, exist_ok=True)
         module_log_path.write_text(_build_module_release_log_markdown(group), encoding="utf-8")
 
-
-def _inject_release_summary_into_home(entries: list[ReleaseEntry]) -> None:
-    home_path = DOCS_DIR / "index.md"
-    if not home_path.exists():
-        return
-
-    content = home_path.read_text(encoding="utf-8")
-    summary = _build_release_home_summary(entries)
-
-    if HOME_RELEASE_PLACEHOLDER in content:
-        updated = content.replace(HOME_RELEASE_PLACEHOLDER, summary)
-    else:
-        suffix = "" if content.endswith("\n") else "\n"
-        updated = content + suffix + "\n## 版本发布总览\n\n" + summary + "\n"
-
-    home_path.write_text(updated, encoding="utf-8")
-
-
 def stage_docs() -> list[tuple[Path, str]]:
     source_files, generated_pages, markdown_routes = _prepare_source_manifest()
     release_entries = _collect_release_entries()
@@ -1617,7 +1902,7 @@ def stage_docs() -> list[tuple[Path, str]]:
         target_path.write_text(generated_page.markdown, encoding="utf-8")
 
     _write_release_pages(release_entries)
-    _inject_release_summary_into_home(release_entries)
+    _write_contribution_pages(release_entries)
 
     return markdown_routes
 
@@ -1712,9 +1997,23 @@ def _print_release_entries(entries: list[ReleaseEntry]) -> None:
         )
 
 
+def _print_contribution_records(records: list[ContributionRecord]) -> None:
+    for owner in _contribution_people(records):
+        owner_records = [item for item in records if item.owner == owner]
+        confirmed = [item for item in owner_records if _contribution_status_confirmed(item.status)]
+        print(
+            f"{owner} -> "
+            f"records={len(owner_records)}, "
+            f"confirmed={len(confirmed)}, "
+            f"points={sum(item.points for item in confirmed)}, "
+            f"roles={', '.join(sorted({_contribution_role_label(item.role) for item in owner_records}))}"
+        )
+
+
 def build_cli() -> None:
     routes = build_site()
     release_entries = _collect_release_entries()
+    contribution_records = _collect_contribution_records(release_entries)
     print(f"Built {len(routes)} markdown pages into {SITE_DIR}")
     print(
         "Aggregated "
@@ -1725,6 +2024,11 @@ def build_cli() -> None:
         "Generated "
         f"{_history_count(release_entries)} history entries into "
         f"{(DOCS_DIR / RELEASE_HISTORY_TARGET).relative_to(ROOT_DIR).as_posix()}"
+    )
+    print(
+        "Generated "
+        f"{len(contribution_records)} derived contribution records into "
+        f"{(DOCS_DIR / CONTRIBUTION_CENTER_TARGET).relative_to(ROOT_DIR).as_posix()}"
     )
     _print_routes(routes)
 
@@ -1754,6 +2058,23 @@ def scan_releases_cli() -> None:
     _print_release_entries(entries)
 
 
+def scan_contributions_cli() -> None:
+    entries = _collect_release_entries()
+    records = _collect_contribution_records(entries)
+    confirmed = [item for item in records if _contribution_status_confirmed(item.status)]
+    architecture_records = [item for item in records if item.role == "architecture_owner"]
+    release_records = [item for item in records if item.role == "release_owner"]
+    print(f"Derived contribution records from {len(entries)} architecture lines under {APP_DIR}")
+    print(f"Contribution records: {len(records)}")
+    print(f"Owners: {len(_contribution_people(records))}")
+    print(f"Architecture owner records: {len(architecture_records)}")
+    print(f"Release owner records: {len(release_records)}")
+    print(f"Modules: {len(_contribution_modules(records))}")
+    print(f"Confirmed records: {len(confirmed)}")
+    print(f"Confirmed points: {sum(item.points for item in confirmed)}")
+    _print_contribution_records(records)
+
+
 def main() -> None:
     command = sys.argv[1] if len(sys.argv) > 1 else "build"
     if command == "build":
@@ -1765,7 +2086,10 @@ def main() -> None:
     if command == "scan-releases":
         scan_releases_cli()
         return
-    raise SystemExit("Usage: python -m auto_docs.docsite [build|scan|scan-releases]")
+    if command == "scan-contributions":
+        scan_contributions_cli()
+        return
+    raise SystemExit("Usage: python -m auto_docs.docsite [build|scan|scan-releases|scan-contributions]")
 
 
 if __name__ == "__main__":
