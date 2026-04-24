@@ -85,7 +85,7 @@ uv run scan-releases
 [module]
 name = "scripts"
 summary = "脚本主模块"
-owner = "Platform Team"
+owner = ["Platform Team", "Docs Team"]
 home = "README.md"
 
 [version]
@@ -126,8 +126,9 @@ architecture_notes = "版本信息改为从 release.toml 渲染。"
 
 - `[version]` 表示当前版本快照
 - `[architecture]` 表示当前唯一架构线
-- `[version].owner` 表示当前版本 release owner
-- `[architecture].owner` 表示当前架构 owner
+- `[module].owner` 允许写字符串或数组，仅用于工具级展示
+- `[version].owner` 表示当前版本 release owner，允许写字符串或数组
+- `[architecture].owner` 表示当前架构 owner，允许写字符串或数组
 - `doc_checklist` 表示该架构线下的固定文档点检清单
 - `[[history]]` 表示历史发布记录，按版本维度输出日志
 - `[[history]].owner` 表示对应历史版本的 release owner
@@ -139,7 +140,7 @@ architecture_notes = "版本信息改为从 release.toml 渲染。"
 [module]
 name = "scripts"
 summary = "脚本主模块"
-owner = "Platform Team"
+owner = ["Platform Team", "Docs Team"]
 home = "README.md"
 
 [[architectures]]
@@ -212,11 +213,11 @@ breaking_changes = [
 多架构模式说明：
 
 - `[[architectures]]` 表示同一个工具下的一条架构线
-- `owner` 表示架构 owner
-- `release_owner` 表示当前版本 release owner
+- `owner` 表示该架构线的 owner，允许写字符串或数组
+- `release_owner` 表示该架构线当前版本 release owner，允许写字符串或数组
 - `doc_checklist` 表示该架构线下的固定文档点检清单
 - `[[architectures.history]]` 表示该架构线自己的版本历史
-- `[[architectures.history]].owner` 表示对应历史版本的 release owner
+- `[[architectures.history]].owner` 表示对应历史版本的 release owner，允许写字符串或数组
 - 生成结果仍然是“一个工具一个发布日志页”，但页内会按 `ARC_V1`、`ARC_V2` 分节展示
 - `release-center/index.md` 会汇总所有工具和架构线
 - `release-center/history/index.md` 会把所有架构线的历史记录合并成全局时间线
@@ -252,6 +253,7 @@ uv run build-docs
 
 约定：
 
+- `module.owner` 可以是字符串或数组，但只用于工具级展示，不直接参与积分归属
 - `architecture.owner` 或 `architectures.owner` 表示架构负责人
 - `version.owner` 或 `architectures.release_owner` 表示当前版本发布负责人
 - `history.owner` 或 `architectures.history.owner` 表示历史版本发布负责人
@@ -266,6 +268,8 @@ uv run build-docs
   `软著=80`、`专利=100`、`用户手册=20`、`设计方案=30`、`测试报告=20`
 - 发布负责人：
   每个历史版本固定计 `10` 分
+- 如果同一条架构线或同一个版本记录配置了多个 owner，积分会按人数平均分摊
+- 贡献统计的有效粒度是“架构线 + 版本迭代”，不是工具整体 owner
 
 ## 你最关心的两个问题
 

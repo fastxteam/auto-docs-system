@@ -1,7 +1,7 @@
 [module]
 name = "scripts"
 summary = "脚本主模块，负责清理任务、批处理入口和文档汇总。"
-owner = "Platform Team"
+owner = ["Platform Team", "Docs Team"]
 home = "README.md"
 
 [[architectures]]
@@ -41,7 +41,7 @@ breaking_changes = []
 version = "1.2.0"
 channel = "stable"
 released_at = "2026-04-18"
-owner = "Release Manager"
+owner = "Legacy Release Owner"
 title = "ARC_V1 统一 Markdown 构建流程"
 summary = "完成 app 目录扫描、README 路由约定和静态 HTML 构建。"
 changes = [
@@ -54,7 +54,7 @@ breaking_changes = []
 version = "1.1.0"
 channel = "beta"
 released_at = "2026-04-12"
-owner = "Release Manager"
+owner = "Bootstrap Release Owner"
 title = "ARC_V1 文档脚手架初版"
 summary = "引入 MkDocs 作为脚本文档静态站基础设施。"
 changes = [
